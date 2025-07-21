@@ -1,0 +1,158 @@
+{
+    "info": {
+        "name": "Store System API",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Inventory",
+            "item": [
+                {
+                    "name": "Stockkeeper Add Product and Batch",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"name\": \"Кока-Кола 0.5л\", \"barcode\": \"5449000000996\", \"category_id\": 1, \"sale_price\": 89.90, \"quantity\": 100, \"expiration_date\": \"2025-12-31\", \"supplier\": \"ООО Напитки\", \"unit\": \"piece\", \"purchase_price\": 50.00}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/inventory/stockkeeper/add/",
+                            "host": ["127.0.0.1"],
+                            "port": "8000",
+                            "path": ["api", "inventory", "stockkeeper", "add", ""]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Category",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"name\": \"Напитки\"}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/categories/",
+                            "host": ["127.0.0.1"],
+                            "port": "8000",
+                            "path": ["api", "categories", ""]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Products",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/products/?barcode=5449000000996",
+                            "host": ["127.0.0.1"],
+                            "port": "8000",
+                            "path": ["api", "products", ""],
+                            "query": [
+                                {
+                                    "key": "barcode",
+                                    "value": "5449000000996"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Customers",
+            "item": [
+                {
+                    "name": "Create Customer",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"full_name\": \"Иван Иванов\", \"phone\": \"+79991234567\"}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/customers/",
+                            "host": ["127.0.0.1"],
+                            "port": "8000",
+                            "path": ["api", "customers", ""]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Sales",
+            "item": [
+                {
+                    "name": "Create Transaction (Debt)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"cashier\": 1, \"new_customer\": {\"full_name\": \"Петр Петров\", \"phone\": \"+79991234568\"}, \"total_amount\": 150.50, \"payment_method\": \"debt\", \"items\": [{\"product\": 1, \"quantity\": 2, \"price\": 75.25}]}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/transactions/",
+                            "host": ["127.0.0.1"],
+                            "port": "8000",
+                            "path": ["api", "transactions", ""]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Simple Sale",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\"product_id\": 1, \"quantity\": 2}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8000/api/sales/sell/",
+                            "host": ["127.0.0.1"],
+                            "port": "8000",
+                            "path": ["api", "sales", "sell", ""]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ]
+}
