@@ -1,681 +1,547 @@
-import logging
-from rest_framework.views import APIView
+# inventory/views.py
+from rest_framework import status, generics
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status, permissions
-from django.db.models import Q
-from django.db.models import F
-from django.db import transaction
+from rest_framework.viewsets import ModelViewSet
+from django.db import transaction, models
+from django.db.models import Q, Sum, Prefetch
 from django.utils.translation import gettext_lazy as _
-from .models import Product, ProductCategory, Stock, ProductBatch
-from .serializers import (
-    ProductSerializer, 
-    ProductCategorySerializer, 
-    StockSerializer, 
-    ProductBatchSerializer, 
-    SaleSerializer
-)
-
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+import logging
+
+from .models import (
+    Product, ProductCategory, Stock, ProductBatch, 
+    AttributeType, AttributeValue, ProductAttribute,
+    SizeChart, SizeInfo
+)
+from .serializers import (
+    ProductSerializer, ProductCategorySerializer, StockSerializer,
+    ProductBatchSerializer, AttributeTypeSerializer, AttributeValueSerializer,
+    ProductAttributeSerializer, SizeChartSerializer, SizeInfoSerializer
+)
+
+from .filters import ProductFilter, ProductBatchFilter, StockFilter
 
 logger = logging.getLogger('inventory')
 
-class IsStockkeeperOrAdmin(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.groups.filter(name__in=['admin', 'stockkeeper']).exists()
-    
-class BaseInventoryView(APIView):
-    """Базовый класс для всех вьюшек инвентаря"""
-    
-    def handle_exception(self, exc):
-        logger.error(f"[SomPOS] Error in {self.__class__.__name__}: {str(exc)}", 
-                    exc_info=True)
-        return super().handle_exception(exc)
 
-
-class ProductCategoryCreateView(BaseInventoryView):
+class ProductCategoryViewSet(ModelViewSet):
+    """
+    ViewSet для управления категориями товаров
+    """
+    queryset = ProductCategory.objects.all()
+    serializer_class = ProductCategorySerializer
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at']
+    ordering = ['name']
 
     @swagger_auto_schema(
-        operation_summary="Создать категорию товара",
-        operation_description="Создает новую категорию для товаров",
+        operation_description="Получить все категории товаров",
+        responses={200: ProductCategorySerializer(many=True)}
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_description="Создать новую категорию товара",
         request_body=ProductCategorySerializer,
         responses={
             201: ProductCategorySerializer,
-            400: "Невалидные данные"
-        },
-        tags=['Категории']
+            400: 'Ошибка валидации'
+        }
     )
-
-    def post(self, request):
-        serializer = ProductCategorySerializer(data=request.data)
-        if not serializer.is_valid():
-            logger.warning(f"Invalid category data: {serializer.errors}")
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        category = serializer.save()
-        logger.info(f"Created category: {category.name} (ID: {category.id})")
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
 
 
-class ProductCategoryListView(BaseInventoryView):
+class AttributeTypeViewSet(ModelViewSet):
+    """
+    ViewSet для управления типами атрибутов (динамические атрибуты)
+    """
+    queryset = AttributeType.objects.prefetch_related('values').all()
+    serializer_class = AttributeTypeSerializer
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['name', 'slug']
+    ordering_fields = ['name']
+    ordering = ['name']
 
     @swagger_auto_schema(
-        operation_summary="Список категорий",
-        operation_description="Возвращает все категории товаров",
-        responses={200: ProductCategorySerializer(many=True)},
-        tags=['Категории']
+        operation_description="Получить все типы атрибутов с их значениями",
+        responses={200: AttributeTypeSerializer(many=True)}
     )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
-    def get(self, request):
-        categories = ProductCategory.objects.all().order_by('name')
-        serializer = ProductCategorySerializer(categories, many=True)
-        logger.debug(f"Returned {len(categories)} categories")
-        return Response(serializer.data)
-
-
-class ProductCreateView(BaseInventoryView):
-
-    @swagger_auto_schema(
-        operation_summary="Создать товар",
-        operation_description="Добавляет новый товар в систему",
-        request_body=ProductSerializer,
-        responses={
-            201: ProductSerializer,
-            400: "Невалидные данные"
-        },
-        tags=['Товары']
-    )
-    
-    def post(self, request):
-        serializer = ProductSerializer(data=request.data)
-        if not serializer.is_valid():
-            logger.warning(f"Invalid product data: {serializer.errors}")
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        product = serializer.save()
-        logger.info(f"Created product: {product.name} (ID: {product.id})")
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-class ProductListView(BaseInventoryView):
-
-    @swagger_auto_schema(
-        operation_summary="Список товаров",
-        operation_description="Возвращает все товары с пагинацией",
-        manual_parameters=[
-            openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
-            openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER)
-        ],
-        responses={200: ProductSerializer(many=True)},
-        tags=['Товары']
-    )
-
-    def get(self, request):
-        products = Product.objects.select_related('category').order_by('name')
-        serializer = ProductSerializer(products, many=True)
-        logger.debug(f"Returned {len(products)} products")
-        return Response(serializer.data)
-
-
-class ProductSearchView(BaseInventoryView):
-
-    @swagger_auto_schema(
-        operation_summary="Поиск товаров",
-        operation_description="Поиск товаров по названию или штрихкоду",
-        manual_parameters=[
-            openapi.Parameter('q', openapi.IN_QUERY, description="Поисковый запрос", 
-                            type=openapi.TYPE_STRING, required=True)
-        ],
-        responses={200: ProductSerializer(many=True)},
-        tags=['Товары', 'Поиск']
-    )
-
-    def get(self, request):
-        query = request.query_params.get('q', '').strip()
-        if not query:
-            return Response(
-                {"error": _("Search query is required")},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        products = Product.objects.filter(
-            Q(name__icontains=query) |
-            Q(barcode__icontains=query)
-        ).select_related('category')[:50]  # Лимит результатов
-        
-        serializer = ProductSerializer(products, many=True)
-        logger.info(f"Search for '{query}' returned {len(products)} products")
+    @action(detail=False, methods=['get'])
+    def for_product_creation(self, request):
+        """
+        Получить все активные атрибуты для создания товара
+        """
+        attributes = self.get_queryset().filter(values__isnull=False).distinct()
+        serializer = self.get_serializer(attributes, many=True)
         return Response({
-            'query': query,
-            'results': serializer.data,
-            'count': len(products)
+            'attributes': serializer.data,
+            'message': _('Доступные атрибуты для создания товара')
         })
 
 
-class ProductBarcodeLookupView(BaseInventoryView):
+class AttributeValueViewSet(ModelViewSet):
+    """
+    ViewSet для управления значениями атрибутов
+    """
+    queryset = AttributeValue.objects.select_related('attribute_type').all()
+    serializer_class = AttributeValueSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ['attribute_type']
+    search_fields = ['value']
+
+
+class ProductViewSet(ModelViewSet):
+    """
+    ViewSet для управления товарами с полной логикой создания и управления
+    """
+    serializer_class = ProductSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ProductFilter
+    search_fields = ['name', 'barcode', 'category__name']
+    filterset_fields = ['category', 'attributes__attribute_type']
+    ordering_fields = ['name', 'sale_price', 'created_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        return Product.objects.select_related(
+            'category', 'stock'
+        ).prefetch_related(
+            'attributes',
+            'productattribute_set__attribute_value__attribute_type',
+            'size_info__size',
+            'batches'
+        )
 
     @swagger_auto_schema(
-        operation_summary="Поиск по штрихкоду",
-        operation_description="Поиск товара по штрихкоду",
-        manual_parameters=[
-            openapi.Parameter('barcode', openapi.IN_QUERY, 
-                            description="Штрихкод товара", 
-                            type=openapi.TYPE_STRING, required=True)
-        ],
-        responses={
-            200: ProductSerializer,
-            404: "Товар не найден",
-            400: "Не указан штрихкод"
-        },
-        tags=['Товары', 'Поиск']
+        operation_description="Получить все товары с остатками и атрибутами",
+        responses={200: ProductSerializer(many=True)}
     )
-
-    def get(self, request):
-        barcode = request.query_params.get('barcode', '').strip()
-        if not barcode:
-            return Response(
-                {"error": _("Barcode is required")},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        try:
-            product = Product.objects.filter(barcode=barcode).first()
-            if not product:
-                logger.debug(f"No product found for barcode: {barcode}")
-                return Response(
-                    {"message": _("Product not found")},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-                
-            serializer = ProductSerializer(product)
-            logger.info(f"Found product {product.id} for barcode: {barcode}")
-            return Response(serializer.data)
-            
-        except Exception as e:
-            logger.error(f"Barcode lookup error: {str(e)}")
-            return Response(
-                {"error": _("Internal server error")},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-class StockManagementView(BaseInventoryView):
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
     @swagger_auto_schema(
-        auto_schema=None,
-        operation_summary="Обновление остатков",
-        operation_description="Ручное изменение количества товара на складе",
-        request_body=StockSerializer,
+        operation_description="Создать новый товар или добавить партию существующего",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Штрих-код'),
+                'name': openapi.Schema(type=openapi.TYPE_STRING, description='Название товара'),
+                'category': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID категории'),
+                'sale_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена продажи'),
+                'attributes': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'attribute_id': openapi.Schema(type=openapi.TYPE_INTEGER)
+                        }
+                    )
+                ),
+                'batch_info': openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'quantity': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'purchase_price': openapi.Schema(type=openapi.TYPE_NUMBER),
+                        'supplier': openapi.Schema(type=openapi.TYPE_STRING),
+                        'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date')
+                    }
+                )
+            }
+        ),
         responses={
-            200: StockSerializer,
-            400: "Невалидные данные",
-            404: "Товар не найден"
+            201: ProductSerializer,
+            400: 'Ошибка валидации'
         }
     )
     @transaction.atomic
-    def post(self, request):
-        product_id = request.data.get('product_id')
-        quantity = request.data.get('quantity')
+    def create(self, request, *args, **kwargs):
+        """
+        Создание товара с логикой:
+        1. Если штрих-код существует - добавляем партию
+        2. Если нет - создаем новый товар
+        """
+        barcode = request.data.get('barcode')
+        batch_info = request.data.pop('batch_info', {})
         
-        if not product_id or not quantity:
-            return Response(
-                {"error": _("product_id and quantity are required")},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        try:
-            stock = Stock.objects.select_for_update().get(product_id=product_id)
-            stock.quantity += int(quantity)
-            if stock.quantity < 0:
-                raise ValueError(_("Stock cannot be negative"))
-                
-            stock.save()
-            logger.info(
-                f"Updated stock for product {product_id}. "
-                f"Change: {quantity}, New quantity: {stock.quantity}"
-            )
-            return Response(StockSerializer(stock).data)
-            
-        except Stock.DoesNotExist:
-            return Response(
-                {"error": _("Product not found")},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except ValueError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-
-class ProductBatchCreateView(BaseInventoryView):
-
-    @swagger_auto_schema(
-        operation_summary="Добавить партию",
-        operation_description="Добавляет новую партию товара на склад",
-        request_body=ProductBatchSerializer,
-        responses={
-            201: ProductBatchSerializer,
-            400: "Невалидные данные"
-        },
-        tags=['Склад']
-    )
-
-    @transaction.atomic
-    def post(self, request):
-        serializer = ProductBatchSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        batch = serializer.save()
-        logger.info(
-            f"Created batch {batch.id} for product {batch.product_id}. "
-            f"Quantity: {batch.quantity}, Expires: {batch.expiration_date}"
-        )
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-# class ProductScanView(APIView):
-#     @swagger_auto_schema(
-#         operation_summary="Сканирование товара",
-#         operation_description="Сканирование штрихкода с автоматическим созданием товара или добавлением партии",
-#         request_body=openapi.Schema(
-#             type=openapi.TYPE_OBJECT,
-#             properties={
-#                 'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Штрихкод товара'),
-#                 'name': openapi.Schema(type=openapi.TYPE_STRING, description='Название товара'),
-#                 'category': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID категории'),
-#                 'sale_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена продажи'),
-#                 'quantity': openapi.Schema(type=openapi.TYPE_INTEGER, description='Количество в партии', default=1),
-#                 'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date', description='Срок годности (YYYY-MM-DD)', nullable=True),
-#                 'supplier': openapi.Schema(type=openapi.TYPE_STRING, description='Поставщик', nullable=True),
-#                 'purchase_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена закупки', nullable=True),
-#                 'unit': openapi.Schema(type=openapi.TYPE_STRING, description='Единица измерения (piece, kg, liter, pack)', default='piece')
-#             },
-#             required=['barcode', 'name', 'category', 'sale_price', 'quantity']
-#         ),
-#         responses={
-#             200: openapi.Response('Товар существует, партия добавлена/обновлена', ProductSerializer),
-#             201: openapi.Response('Товар создан', ProductSerializer),
-#             400: openapi.Response('Невалидные данные')
-#         },
-#         tags=['Товары', 'Сканирование']
-#     )
-#     @transaction.atomic
-#     def post(self, request):
-#         barcode = request.data.get('barcode', '').strip()
-#         if not barcode:
-#             return Response(
-#                 {"error": _("Штрихкод обязателен")},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         # Проверяем существующий товар
-#         product = Product.objects.filter(barcode=barcode).first()
-#         if product:
-#             # Обновляем данные товара, если нужно
-#             product_data = {
-#                 'name': request.data.get('name'),
-#                 'category': request.data.get('category'),
-#                 'sale_price': request.data.get('sale_price'),
-#                 'unit': request.data.get('unit', 'piece')
-#             }
-#             product_serializer = ProductSerializer(product, data=product_data, partial=True)
-#             if not product_serializer.is_valid():
-#                 return Response(product_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#             product = product_serializer.save()
-
-#             # Проверяем существующую партию с таким же сроком годности и поставщиком
-#             supplier = request.data.get('supplier', '')
-#             expiration_date = request.data.get('expiration_date')
-#             batch_query = ProductBatch.objects.filter(
-#                 product=product,
-#                 expiration_date=expiration_date,
-#                 supplier=supplier
-#             )
-#             if batch_query.exists():
-#                 batch = batch_query.first()
-#                 batch.quantity = F('quantity') + request.data.get('quantity', 1)
-#                 batch.save(update_fields=['quantity'])
-#                 batch.refresh_from_db(fields=['quantity'])
-#                 batch_serializer = ProductBatchSerializer(batch)
-#                 logger.info(
-#                     f"Updated batch {batch.id} for product {product.id}. "
-#                     f"New quantity: {batch.quantity}"
-#                 )
-#             else:
-#                 batch_data = {
-#                     'product': product.id,
-#                     'quantity': request.data.get('quantity', 1),
-#                     'expiration_date': expiration_date,
-#                     'supplier': supplier,
-#                     'purchase_price': request.data.get('purchase_price')
-#                 }
-#                 batch_serializer = ProductBatchSerializer(data=batch_data)
-#                 if not batch_serializer.is_valid():
-#                     return Response(batch_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#                 batch = batch_serializer.save()
-#                 logger.info(
-#                     f"Created new batch {batch.id} for product {product.id}. "
-#                     f"Quantity: {batch.quantity}"
-#                 )
-
-#             return Response(
-#                 {
-#                     "exists": True,
-#                     "message": _("Товар существует, партия добавлена/обновлена"),
-#                     "product": ProductSerializer(product).data,
-#                     "batch": batch_serializer.data
-#                 },
-#                 status=status.HTTP_200_OK
-#             )
-
-#         # Создаём новый товар
-#         product_data = {
-#             'barcode': barcode,
-#             'name': request.data.get('name'),
-#             'category': request.data.get('category'),
-#             'sale_price': request.data.get('sale_price'),
-#             'unit': request.data.get('unit', 'piece')
-#         }
-#         product_serializer = ProductSerializer(data=product_data)
-#         if not product_serializer.is_valid():
-#             return Response(product_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         product = product_serializer.save()
-
-#         # Создаём партию
-#         batch_data = {
-#             'product': product.id,
-#             'quantity': request.data.get('quantity', 1),
-#             'expiration_date': request.data.get('expiration_date'),
-#             'supplier': request.data.get('supplier', ''),
-#             'purchase_price': request.data.get('purchase_price')
-#         }
-#         batch_serializer = ProductBatchSerializer(data=batch_data)
-#         if not batch_serializer.is_valid():
-#             return Response(batch_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         batch = batch_serializer.save()
-
-#         logger.info(
-#             f"Created new product {product.id} from scan. "
-#             f"Batch: {batch.quantity} units"
-#         )
-#         return Response(
-#             {
-#                 "exists": False,
-#                 "message": _("Товар создан"),
-#                 "product": product_serializer.data,
-#                 "batch": batch_serializer.data
-#             },
-#             status=status.HTTP_201_CREATED
-#         )
-class ProductScanView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsStockkeeperOrAdmin]
-
-    # @swagger_auto_schema(
-    #     auto_schema=None,
-    #     operation_summary="Сканирование товара",
-    #     operation_description="Сканирование штрихкода или создание товара без штрихкода с добавлением партии",
-    #     request_body=openapi.Schema(
-    #         type=openapi.TYPE_OBJECT,
-    #         properties={
-    #             'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Штрихкод товара (необязательный)', nullable=True),
-    #             'name': openapi.Schema(type=openapi.TYPE_STRING, description='Название товара'),
-    #             'category': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID категории'),
-    #             'sale_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена продажи'),
-    #             'quantity': openapi.Schema(type=openapi.TYPE_INTEGER, description='Количество в партии', default=1),
-    #             'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date', description='Срок годности (YYYY-MM-DD)', nullable=True),
-    #             'supplier': openapi.Schema(type=openapi.TYPE_STRING, description='Поставщик', nullable=True),
-    #             'purchase_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена закупки', nullable=True),
-    #             'unit': openapi.Schema(type=openapi.TYPE_STRING, description='Единица измерения (piece, kg, liter, pack)', default='piece')
-    #         },
-    #         required=['name', 'category', 'sale_price', 'quantity']
-    #     ),
-    #     responses={
-    #         200: openapi.Response('Товар существует, партия добавлена/обновлена', ProductSerializer),
-    #         201: openapi.Response('Товар создан', ProductSerializer),
-    #         400: openapi.Response('Невалидные данные')
-    #     },
-    #     tags=['Товары', 'Сканирование'],
-    #     security=[{'Bearer': []}]
-    # )
-    @transaction.atomic
-    def post(self, request):
-        barcode = request.data.get('barcode', '').strip() or None
-        name = request.data.get('name')
-        category_id = request.data.get('category')
-        sale_price = request.data.get('sale_price')
-        quantity = request.data.get('quantity', 1)
-        expiration_date = request.data.get('expiration_date')
-        supplier = request.data.get('supplier', '')
-        unit = request.data.get('unit', 'piece')
-
-        if not all([name, category_id, sale_price, quantity]):
-            return Response(
-                {"error": _("Поля name, category, sale_price, quantity обязательны")},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        product = None
+        # Проверяем существование товара по штрих-коду
         if barcode:
-            product = Product.objects.filter(barcode=barcode).first()
-        if not product:
-            product = Product.objects.filter(name=name, category_id=category_id).first()
+            try:
+                existing_product = Product.objects.get(barcode=barcode)
+                # Товар существует - добавляем партию
+                if batch_info:
+                    batch_data = {
+                        'product': existing_product.id,
+                        **batch_info
+                    }
+                    batch_serializer = ProductBatchSerializer(data=batch_data)
+                    if batch_serializer.is_valid():
+                        batch_serializer.save()
+                        logger.info(f"Добавлена партия для товара {existing_product.name}")
+                    else:
+                        return Response(
+                            {'batch_errors': batch_serializer.errors},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                
+                serializer = self.get_serializer(existing_product)
+                return Response({
+                    'product': serializer.data,
+                    'message': _('Партия добавлена к существующему товару'),
+                    'action': 'batch_added'
+                }, status=status.HTTP_200_OK)
+                
+            except Product.DoesNotExist:
+                pass  # Товар не найден, создаем новый
 
-        if product:
-            product_data = {
-                'name': name,
-                'category': category_id,
-                'sale_price': sale_price,
-                'unit': unit,
-                'barcode': barcode
-            }
-            product_serializer = ProductSerializer(product, data=product_data, partial=True)
-            if not product_serializer.is_valid():
-                return Response(product_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            product = product_serializer.save()
-
-            batch_query = ProductBatch.objects.filter(
-                product=product,
-                expiration_date=expiration_date,
-                supplier=supplier
-            )
-            if batch_query.exists():
-                batch = batch_query.first()
-                batch.quantity = F('quantity') + quantity
-                batch.save(update_fields=['quantity'])
-                batch_serializer = ProductBatchSerializer(batch)
-                logger.info(
-                    f"Updated batch {batch.id} for product {product.id} by {request.user.username}. "
-                    f"New quantity: {batch.quantity}"
-                )
-            else:
+        # Создаем новый товар
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            product = serializer.save()
+            
+            # Добавляем атрибуты
+            self._handle_product_attributes(product, request.data.get('attributes', []))
+            
+            # Создаем партию если указана
+            if batch_info:
                 batch_data = {
                     'product': product.id,
-                    'quantity': quantity,
-                    'expiration_date': expiration_date,
-                    'supplier': supplier,
-                    'purchase_price': request.data.get('purchase_price')
+                    **batch_info
                 }
                 batch_serializer = ProductBatchSerializer(data=batch_data)
-                if not batch_serializer.is_valid():
-                    return Response(batch_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-                batch = batch_serializer.save()
-                logger.info(
-                    f"Created new batch {batch.id} for product {product.id} by {request.user.username}. "
-                    f"Quantity: {batch.quantity}"
-                )
+                if batch_serializer.is_valid():
+                    batch_serializer.save()
+                    logger.info(f"Создана партия для нового товара {product.name}")
 
-            return Response(
-                {
-                    "exists": True,
-                    "message": _("Товар существует, партия добавлена/обновлена"),
-                    "product": ProductSerializer(product).data,
-                    "batch": batch_serializer.data
-                },
-                status=status.HTTP_200_OK
-            )
+            # Возвращаем обновленные данные
+            updated_serializer = self.get_serializer(product)
+            return Response({
+                'product': updated_serializer.data,
+                'message': _('Товар успешно создан'),
+                'action': 'product_created'
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        product_data = {
-            'barcode': barcode,
-            'name': name,
-            'category': category_id,
-            'sale_price': sale_price,
-            'unit': unit
-        }
-        product_serializer = ProductSerializer(data=product_data)
-        if not product_serializer.is_valid():
-            return Response(product_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        product = product_serializer.save()
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        """
+        Обновление товара с атрибутами
+        """
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        
+        if serializer.is_valid():
+            product = serializer.save()
+            
+            # Обновляем атрибуты если переданы
+            if 'attributes' in request.data:
+                self._handle_product_attributes(product, request.data['attributes'])
+            
+            updated_serializer = self.get_serializer(product)
+            return Response(updated_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        batch_data = {
-            'product': product.id,
-            'quantity': quantity,
-            'expiration_date': expiration_date,
-            'supplier': supplier,
-            'purchase_price': request.data.get('purchase_price')
-        }
-        batch_serializer = ProductBatchSerializer(data=batch_data)
-        if not batch_serializer.is_valid():
-            return Response(batch_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        batch = batch_serializer.save()
-
-        logger.info(
-            f"Created new product {product.id} by {request.user.username}. "
-            f"Batch: {batch.quantity} units"
-        )
-        return Response(
-            {
-                "exists": False,
-                "message": _("Товар создан"),
-                "product": product_serializer.data,
-                "batch": batch_serializer.data
-            },
-            status=status.HTTP_201_CREATED
-        )
-
-class SaleProcessingView(BaseInventoryView):
+    def _handle_product_attributes(self, product, attributes_data):
+        """
+        Обработка атрибутов товара
+        """
+        if not attributes_data:
+            return
+            
+        # Удаляем старые атрибуты
+        ProductAttribute.objects.filter(product=product).delete()
+        
+        # Добавляем новые атрибуты
+        for attr_data in attributes_data:
+            attribute_value_id = attr_data.get('attribute_id')
+            if attribute_value_id:
+                try:
+                    attribute_value = AttributeValue.objects.get(id=attribute_value_id)
+                    ProductAttribute.objects.create(
+                        product=product,
+                        attribute_value=attribute_value
+                    )
+                except AttributeValue.DoesNotExist:
+                    logger.warning(f"Атрибут с ID {attribute_value_id} не найден")
 
     @swagger_auto_schema(
-        operation_summary="Оформление продажи",
-        operation_description="Проведение продажи товара со списанием со склада",
-        request_body=SaleSerializer,
-        responses={
-            200: openapi.Response('Успешная продажа', schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    'product_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'quantity_sold': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'remaining_stock': openapi.Schema(type=openapi.TYPE_INTEGER)
-                }
-            )),
-            400: "Невалидные данные",
-            404: "Товар не найден"
-        },
-        tags=['Продажи']
-    )
-    
-    @transaction.atomic
-    def post(self, request):
-        serializer = SaleSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        product_id = serializer.validated_data['product_id']
-        quantity = serializer.validated_data['quantity']
-        
-        try:
-            stock = Stock.objects.select_for_update().get(product_id=product_id)
-            stock.sell(quantity)
-            
-            logger.info(
-                f"Processed sale for product {product_id}. "
-                f"Sold: {quantity}, Remaining: {stock.quantity}"
+        operation_description="Сканировать штрих-код и получить информацию о товаре",
+        manual_parameters=[
+            openapi.Parameter(
+                'barcode',
+                openapi.IN_QUERY,
+                description="Штрих-код для сканирования",
+                type=openapi.TYPE_STRING,
+                required=True
             )
+        ]
+    )
+    @action(detail=False, methods=['get'])
+    def scan_barcode(self, request):
+        """
+        Сканирование штрих-кода - возвращает товар если существует или форму создания
+        """
+        barcode = request.query_params.get('barcode')
+        if not barcode:
+            return Response(
+                {'error': _('Штрих-код не указан')},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            product = Product.objects.select_related('category', 'stock').get(barcode=barcode)
+            serializer = self.get_serializer(product)
+            return Response({
+                'found': True,
+                'product': serializer.data,
+                'message': _('Товар найден')
+            })
+        except Product.DoesNotExist:
+            # Товар не найден, возвращаем форму для создания
+            attributes = AttributeType.objects.prefetch_related('values').all()
+            categories = ProductCategory.objects.all()
             
             return Response({
-                "product_id": product_id,
-                "quantity_sold": quantity,
-                "remaining_stock": stock.quantity,
-                "message": _("Sale processed successfully")
+                'found': False,
+                'barcode': barcode,
+                'form_data': {
+                    'categories': ProductCategorySerializer(categories, many=True).data,
+                    'attributes': AttributeTypeSerializer(attributes, many=True).data
+                },
+                'message': _('Товар не найден. Создайте новый товар.')
             })
-            
-        except Stock.DoesNotExist:
+
+    @action(detail=True, methods=['post'])
+    def sell(self, request, pk=None):
+        """
+        Продажа товара (списание со склада)
+        """
+        product = self.get_object()
+        quantity = request.data.get('quantity', 0)
+        
+        if quantity <= 0:
             return Response(
-                {"error": _("Product not found")},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except ValueError as e:
-            return Response(
-                {"error": str(e)},
+                {'error': _('Количество должно быть больше нуля')},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-class StockkeeperProductAddView(APIView):
-    def post(self, request):
-        # Данные от складчика
-        barcode = request.data.get('barcode')
-        name = request.data.get('name')
-        category_id = request.data.get('category_id')
-        sale_price = request.data.get('sale_price')
-        quantity = request.data.get('quantity')
-        expiration_date = request.data.get('expiration_date')
-        supplier = request.data.get('supplier', '')
-        unit = request.data.get('unit', 'piece')
-
-        # Валидация обязательных полей
-        if not all([barcode, name, category_id, sale_price, quantity]):
-            return Response(
-                {"error": "Все поля (barcode, name, category_id, sale_price, quantity) обязательны"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Проверка категории
         try:
-            ProductCategory.objects.get(id=category_id)
-        except ProductCategory.DoesNotExist:
+            with transaction.atomic():
+                product.stock.sell(quantity)
+            
+            return Response({
+                'message': _('Товар успешно продан'),
+                'sold_quantity': quantity,
+                'remaining_stock': product.stock.quantity
+            })
+        except ValueError as e:
             return Response(
-                {"error": "Категория не найдена"},
+                {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Проверка и создание/обновление товара
-        product_data = {
-            "name": name,
-            "barcode": barcode,
-            "category": category_id,
-            "sale_price": sale_price,
-            "unit": unit
-        }
+    @action(detail=False, methods=['get'])
+    def low_stock(self, request):
+        """
+        Получить товары с низким остатком
+        """
+        min_quantity = int(request.query_params.get('min_quantity', 10))
+        products = self.get_queryset().filter(stock__quantity__lte=min_quantity)
+        
+        serializer = self.get_serializer(products, many=True)
+        return Response({
+            'products': serializer.data,
+            'count': products.count(),
+            'min_quantity': min_quantity
+        })
 
-        if Product.objects.filter(barcode=barcode).exists():
-            product = Product.objects.get(barcode=barcode)
-            product_serializer = ProductSerializer(product, data=product_data, partial=True)
-        else:
-            product_serializer = ProductSerializer(data=product_data)
 
-        if not product_serializer.is_valid():
-            return Response(product_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+class ProductBatchViewSet(ModelViewSet):
+    """
+    ViewSet для управления партиями товаров
+    """
+    serializer_class = ProductBatchSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ProductBatchFilter
+    filterset_fields = ['product', 'supplier']
+    search_fields = ['product__name', 'supplier']
+    ordering_fields = ['created_at', 'expiration_date', 'quantity']
+    ordering = ['expiration_date', 'created_at']
 
-        product = product_serializer.save()
+    def get_queryset(self):
+        return ProductBatch.objects.select_related('product').all()
 
-        # Создание новой партии (всегда новая партия, чтобы учесть другой срок годности)
-        batch_data = {
-            "product": product.id,
-            "quantity": quantity,
-            "expiration_date": expiration_date,
-            "supplier": supplier,
-            "purchase_price": request.data.get('purchase_price')
-        }
-        batch_serializer = ProductBatchSerializer(data=batch_data)
-        if batch_serializer.is_valid():
-            batch_serializer.save()
+    @swagger_auto_schema(
+        operation_description="Создать новую партию товара",
+        request_body=ProductBatchSerializer,
+        responses={201: ProductBatchSerializer}
+    )
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            batch = serializer.save()
+            logger.info(f"Создана партия: {batch}")
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'])
+    def expiring_soon(self, request):
+        """
+        Партии с истекающим сроком годности
+        """
+        from datetime import date, timedelta
+        
+        days = int(request.query_params.get('days', 7))
+        expiry_date = date.today() + timedelta(days=days)
+        
+        batches = self.get_queryset().filter(
+            expiration_date__lte=expiry_date,
+            expiration_date__isnull=False
+        )
+        
+        serializer = self.get_serializer(batches, many=True)
+        return Response({
+            'batches': serializer.data,
+            'count': batches.count(),
+            'expiring_within_days': days
+        })
+
+
+class StockViewSet(ModelViewSet):
+    """
+    ViewSet для управления остатками на складе
+    """
+    serializer_class = StockSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = StockFilter
+    search_fields = ['product__name', 'product__barcode']
+    filterset_fields = ['product__category']
+    ordering_fields = ['quantity', 'updated_at']
+    ordering = ['-updated_at']
+
+    def get_queryset(self):
+        return Stock.objects.select_related('product', 'product__category').all()
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """
+        Сводка по остаткам на складе
+        """
+        total_products = self.get_queryset().count()
+        total_quantity = self.get_queryset().aggregate(
+            total=Sum('quantity')
+        )['total'] or 0
+        
+        low_stock_count = self.get_queryset().filter(quantity__lte=10).count()
+        zero_stock_count = self.get_queryset().filter(quantity=0).count()
+        
+        return Response({
+            'total_products': total_products,
+            'total_quantity': total_quantity,
+            'low_stock_products': low_stock_count,
+            'out_of_stock_products': zero_stock_count
+        })
+
+    @action(detail=True, methods=['post'])
+    def adjust(self, request, pk=None):
+        """
+        Корректировка остатков
+        """
+        stock = self.get_object()
+        new_quantity = request.data.get('quantity')
+        reason = request.data.get('reason', 'Корректировка')
+        
+        if new_quantity is None or new_quantity < 0:
             return Response(
-                {
-                    "message": "Товар и партия успешно добавлены",
-                    "product": ProductSerializer(product).data,
-                    "batch": batch_serializer.data
-                },
-                status=status.HTTP_201_CREATED
+                {'error': _('Некорректное количество')},
+                status=status.HTTP_400_BAD_REQUEST
             )
-        return Response(batch_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        old_quantity = stock.quantity
+        stock.quantity = new_quantity
+        stock.save()
+        
+        logger.info(
+            f"Корректировка остатков {stock.product.name}: "
+            f"{old_quantity} -> {new_quantity}. Причина: {reason}"
+        )
+        
+        return Response({
+            'message': _('Остатки скорректированы'),
+            'old_quantity': old_quantity,
+            'new_quantity': new_quantity,
+            'reason': reason
+        })
+
+
+class SizeInfoViewSet(ModelViewSet):
+    """
+    ViewSet для управления размерной информацией
+    """
+    serializer_class = SizeInfoSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['product', 'size']
+
+    def get_queryset(self):
+        return SizeInfo.objects.select_related('product', 'size').all()
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+
+# Дополнительные утилитные views
+
+class InventoryStatsView(generics.GenericAPIView):
+    """
+    Общая статистика по складу
+    """
+    
+    @swagger_auto_schema(
+        operation_description="Получить общую статистику по складу",
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'total_products': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'total_categories': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'total_stock_value': openapi.Schema(type=openapi.TYPE_NUMBER),
+                    'low_stock_alerts': openapi.Schema(type=openapi.TYPE_INTEGER),
+                }
+            )
+        }
+    )
+    def get(self, request):
+        stats = {
+            'total_products': Product.objects.count(),
+            'total_categories': ProductCategory.objects.count(),
+            'total_attributes': AttributeType.objects.count(),
+            'total_stock_quantity': Stock.objects.aggregate(
+                total=Sum('quantity')
+            )['total'] or 0,
+            'low_stock_alerts': Stock.objects.filter(quantity__lte=10).count(),
+            'out_of_stock': Stock.objects.filter(quantity=0).count(),
+            'total_batches': ProductBatch.objects.count(),
+        }
+        
+        # Подсчет общей стоимости склада
+        from django.db.models import F
+        total_value = ProductBatch.objects.aggregate(
+            total=Sum(F('quantity') * F('purchase_price'))
+        )['total'] or 0
+        stats['total_stock_value'] = float(total_value)
+        
+        return Response(stats)

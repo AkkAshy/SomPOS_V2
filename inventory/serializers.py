@@ -1,10 +1,14 @@
 # inventory/serializers.py
 from rest_framework import serializers
-from .models import Product, ProductCategory, Stock, ProductBatch
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from drf_yasg.utils import swagger_serializer_method
 
+from .models import (Product, ProductCategory, Stock, 
+                     ProductBatch, AttributeType,
+                     AttributeValue, ProductAttribute,
+                     SizeChart, SizeInfo
+                     )
 
 class ProductCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,20 +27,152 @@ class ProductCategorySerializer(serializers.ModelSerializer):
             )
         return value
 
+############################################################# Атрибуты #############################################################
+class AttributeValueSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AttributeValue
+        fields = ['id', 'attribute_type', 'value', 'slug']
+
+class AttributeTypeSerializer(serializers.ModelSerializer):
+    values = AttributeValueSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = AttributeType
+        fields = ['id', 'name', 'slug', 'is_filterable', 'values']
+
+class ProductAttributeSerializer(serializers.ModelSerializer):
+    attribute = AttributeValueSerializer(read_only=True)
+    attribute_id = serializers.PrimaryKeyRelatedField(
+        queryset=AttributeValue.objects.all(),
+        source='attribute',
+        write_only=True,
+        help_text=_('ID значения атрибута')
+    )
+
+    class Meta:
+        model = ProductAttribute
+        fields = ['attribute', 'attribute_id']
+############################################################# Атрибуты конец #############################################################
+
+
+class SizeChartSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SizeChart
+        fields = ['id', 'name', 'values']
+
+class SizeInfoSerializer(serializers.ModelSerializer):
+    size = serializers.CharField(source='size.value', read_only=True)
+
+    class Meta:
+        model = SizeInfo
+        fields = ['id', 'product', 'size', 'chest', 'waist', 'length']
+        read_only_fields = ['id']
+        extra_kwargs = {
+            'chest': {'required': False, 'allow_null': True},
+            'waist': {'required': False, 'allow_null': True},
+            'length': {'required': False, 'allow_null': True}
+        }
+        swagger_schema_fields = {
+            'example': {
+                'product': 1,
+                'size': 'M',
+                'chest': 100,
+                'waist': 80,
+                'length': 70
+            }
+        }
+
+    def validate_size(self, value):
+        if value and not AttributeType.objects.filter(slug='size', values__id=value.id).exists():
+            raise serializers.ValidationError(
+                _("Размер должен быть значением атрибута типа 'size'"),
+                code='invalid_size'
+            )
+        return value
+
+
+
+############################################################## Продукты #############################################################
+
+class ProductBatchSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    size = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductBatch
+        fields = [
+            'id',
+            'product',
+            'product_name',
+            'quantity',
+            'purchase_price',
+            'size',
+            'supplier',
+            'expiration_date',
+            'created_at'
+        ]
+
+    def get_size(self, obj):
+        """Возвращает размер из атрибутов товара"""
+        size_attr = obj.product.attributes.filter(attribute_type__slug='size').first()
+        return size_attr.value if size_attr else None
+
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                _("Количество должно быть больше нуля"),
+                code='invalid_quantity'
+            )
+        return value
+
+    def validate(self, data):
+        expiration_date = data.get('expiration_date')
+        if expiration_date and expiration_date < timezone.now().date():
+            raise serializers.ValidationError(
+                {'expiration_date': _("Срок годности не может быть в прошлом")},
+                code='expired_product'
+            )
+        return data
+
+
 
 class ProductSerializer(serializers.ModelSerializer):
-    category = serializers.PrimaryKeyRelatedField(
-        queryset=ProductCategory.objects.all(),
-        error_messages={
-            'does_not_exist': _('Указанная категория не существует'),
-            'incorrect_type': _('Некорректный тип данных для категории')
-        }
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    attributes = ProductAttributeSerializer(
+        source='productattribute_set',
+        many=True,
+        read_only=False,  # Разрешаем запись
+        help_text=_('Атрибуты товара')
     )
+    size = serializers.SerializerMethodField()
+    
+    # Группировка атрибутов по типам (для удобства фронтенда)
+    grouped_attributes = serializers.SerializerMethodField()
     
     current_stock = serializers.IntegerField(
         source='stock.quantity',
         read_only=True,
         help_text=_('Текущий остаток на складе')
+    )
+
+    size_info = SizeInfoSerializer(
+        source='size_info',
+        many=True,
+        read_only=True,
+        help_text=_('Размерные характеристики товара')
+    )
+
+    unit = serializers.ChoiceField(
+        choices=Product.UNIT_CHOICES,
+        read_only=True,
+        help_text=_('Единица измерения товара')
+    )
+
+    batches = ProductBatchSerializer(
+        source='batches',
+        many=True,
+        read_only=True,
+        help_text=_('Партии товара')
     )
 
     @swagger_serializer_method(serializer_or_field=serializers.IntegerField)
@@ -46,8 +182,20 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'barcode', 'category',
-            'unit', 'sale_price', 'created_at', 'current_stock'
+            'id', 
+            'name', 
+            'barcode', 
+            'category', 
+            'category_name', 
+            'sale_price',
+            'attributes',
+            'grouped_attributes',
+            'created_at',
+            'size',
+            'size_info',
+            'unit',
+            'current_stock',
+            'batches'
         ]
         read_only_fields = ['created_at', 'current_stock']
         extra_kwargs = {
@@ -67,6 +215,21 @@ class ProductSerializer(serializers.ModelSerializer):
                 'sale_price': 89.90
             }
         }
+
+    def get_grouped_attributes(self, obj):
+        """Возвращает атрибуты в сгруппированном виде, например:
+        {
+            "Цвет": ["Черный", "Белый"],
+            "Размер": ["XL", "L"]
+        }
+        """
+        grouped = {}
+        for attr in obj.productattribute_set.select_related('attribute__attribute_type').all():
+            attr_type = attr.attribute.attribute_type.name
+            if attr_type not in grouped:
+                grouped[attr_type] = []
+            grouped[attr_type].append(attr.attribute.value)
+        return grouped
 
     def validate_sale_price(self, value):
         if value < 0:
@@ -139,132 +302,7 @@ class StockSerializer(serializers.ModelSerializer):
             )
         return value
 
-class ProductBatchSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source='product.name', read_only=True)
-    product_unit = serializers.CharField(source='product.get_unit_display', read_only=True)
-
-    class Meta:
-        model = ProductBatch
-        fields = ['id', 'product', 'product_name', 'product_unit', 'quantity', 'expiration_date', 'created_at', 'purchase_price', 'supplier']
-        read_only_fields = ['created_at', 'product_name', 'product_unit']
-        extra_kwargs = {
-            'expiration_date': {'required': False, 'allow_null': True},
-            'purchase_price': {'required': False, 'allow_null': True},
-            'supplier': {'trim_whitespace': True, 'required': False, 'allow_blank': True},
-            'quantity': {'default': 1}
-        }
-        ref_name = 'ProductBatchSerializerInventory'
-
-    def validate_quantity(self, value):
-        if value <= 0:
-            raise serializers.ValidationError(
-                _("Количество должно быть больше нуля"),
-                code='invalid_quantity'
-            )
-        return value
-
-    def validate(self, data):
-        expiration_date = data.get('expiration_date')
-        if expiration_date and expiration_date < timezone.now().date():
-            raise serializers.ValidationError(
-                {'expiration_date': _("Срок годности не может быть в прошлом")},
-                code='expired_product'
-            )
-        return data
-    
-# class ProductBatchSerializer(serializers.ModelSerializer):
-#     product_name = serializers.CharField(
-#         source='product.name',
-#         read_only=True
-#     )
-    
-#     product_unit = serializers.CharField(
-#         source='product.get_unit_display',
-#         read_only=True
-#     )
-
-#     class Meta:
-#         model = ProductBatch
-#         fields = [
-#             'id', 'product', 'product_name', 'product_unit',
-#             'quantity', 'expiration_date', 'created_at',
-#             'purchase_price', 'supplier'
-#         ]
-#         read_only_fields = ['created_at']
-#         extra_kwargs = {
-#             'expiration_date': {'required': False, 'allow_null': True},
-#             'purchase_price': {'required': False, 'allow_null': True},
-#             'supplier': {'trim_whitespace': True}
-#         }
-#         swagger_schema_fields = {
-#             'example': {
-#                 'product': 1,
-#                 'quantity': 100,
-#                 'expiration_date': '2024-12-31',
-#                 'purchase_price': 50.00,
-#                 'supplier': 'ООО Напитки'
-#             }
-#         }
 
 
-#     def validate_quantity(self, value):
-#         if value <= 0:
-#             raise serializers.ValidationError(
-#                 _("Количество должно быть больше нуля"),
-#                 code='invalid_quantity'
-#             )
-#         return value
+############################################################### Продукты конец #############################################################    
 
-#     def validate(self, data):
-#         """
-#         Проверка, что срок годности не в прошлом
-#         """
-#         expiration_date = data.get('expiration_date')
-#         if expiration_date and expiration_date < timezone.now().date():
-#             raise serializers.ValidationError(
-#                 {'expiration_date': _("Срок годности не может быть в прошлом")},
-#                 code='expired_product'
-#             )
-#         return data
-
-
-class SaleSerializer(serializers.Serializer):
-    product_id = serializers.IntegerField(
-        min_value=1,
-        help_text=_('ID товара для продажи')
-    )
-    
-    quantity = serializers.IntegerField(
-        min_value=1,
-        help_text=_('Количество товара для продажи')
-    )
-
-    def validate_product_id(self, value):
-        if not Product.objects.filter(id=value).exists():
-            raise serializers.ValidationError(
-                _("Товар с ID %(product_id)s не найден"),
-                params={'product_id': value},
-                code='product_not_found'
-            )
-        return value
-
-    def validate(self, data):
-        product = Product.objects.get(id=data['product_id'])
-        if product.stock.quantity < data['quantity']:
-            raise serializers.ValidationError(
-                {
-                    'quantity': _(
-                        "Недостаточно товара на складе. Доступно: %(available)s"
-                    ) % {'available': product.stock.quantity}
-                },
-                code='insufficient_stock'
-            )
-        return data
-    
-    class Meta:
-        swagger_schema_fields = {
-            'example': {
-                'product_id': 1,
-                'quantity': 2
-            }
-        }

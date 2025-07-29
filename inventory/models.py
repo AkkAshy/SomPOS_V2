@@ -8,8 +8,8 @@ from django.db.models import Sum, F
 logger = logging.getLogger('inventory')
 
 class ProductCategory(models.Model):
-    name = models.CharField(max_length=255, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    name = models.CharField(max_length=255, unique=True, verbose_name="Название")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
     class Meta:
         verbose_name = "Категория товара"
@@ -19,39 +19,84 @@ class ProductCategory(models.Model):
     def __str__(self): 
         return self.name
 
+
+class AttributeType(models.Model):
+    name = models.CharField(max_length=100, unique=True, verbose_name="Название")
+    slug = models.SlugField(max_length=100, unique=True, verbose_name="Слаг")
+    is_filterable = models.BooleanField(default=False, verbose_name="Фильтруемый ли?")
+
+    class Meta:
+        verbose_name = "Тип атрибута"
+        verbose_name_plural = "Типы атрибутов"
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+    
+
+class AttributeValue(models.Model):
+    attribute_type = models.ForeignKey(
+        AttributeType,
+        on_delete=models.CASCADE,
+        related_name='values',
+        verbose_name="Тип атрибута"
+
+    )
+    value = models.CharField(max_length=225, verbose_name="Значение")
+    slug = models.SlugField(max_length=225, unique=True, verbose_name="Слаг")
+    ordering = models.PositiveIntegerField(default=0, verbose_name="Порядок")
+
+    class Meta:
+        verbose_name = "Значение атрибута"
+        verbose_name_plural = "Значения атрибутов"
+        ordering = ['ordering', 'value']
+        unique_together = ('attribute_type', 'slug')
+
+    def __str__(self):
+        return f"{self.attribute_type.name}: {self.value} ({self.slug})"
+
 class Product(models.Model):
     UNIT_CHOICES = [
-        ('piece', 'Штука'), 
-        ('kg', 'Килограмм'), 
-        ('liter', 'Литр'),
-        ('pack', 'Упаковка')
+        ('piece', 'Штука')
     ]
-    
-    name = models.CharField(max_length=255, db_index=True)
+    name = models.CharField(max_length=255, unique=True, verbose_name="Название")
+
+
     barcode = models.CharField(
         max_length=100, 
         unique=True, 
         null=True, 
         blank=True,
-        db_index=True
+        db_index=True,
+        verbose_name="Штрих-код"
     )
     category = models.ForeignKey(
         ProductCategory, 
         on_delete=models.PROTECT,
-        related_name='products'
+        related_name='products',
+        verbose_name="Категория"
     )
     unit = models.CharField(
         max_length=50, 
         choices=UNIT_CHOICES, 
-        default='piece'
+        default='piece',
+        verbose_name="Единица измерения"
     )
     sale_price = models.DecimalField(
         max_digits=10, 
         decimal_places=2, 
         default=0.00, 
-        validators=[MinValueValidator(0)]
+        validators=[MinValueValidator(0)],
+        verbose_name="Цена продажи"
     )
-    created_at = models.DateTimeField(auto_now_add=True)
+    attributes = models.ManyToManyField(
+        AttributeValue,
+        blank=True,
+        related_name='products',
+        verbose_name="Атрибуты"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
     class Meta:
         verbose_name = "Товар"
@@ -63,6 +108,84 @@ class Product(models.Model):
     def __str__(self): 
         return f"{self.name} ({self.get_unit_display()})"
 
+
+class ProductAttribute(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='product_attributes',
+        verbose_name="Товар"
+    )
+    attribute_value = models.ForeignKey(
+        AttributeValue,
+        on_delete=models.CASCADE,
+        related_name='product_attributes',
+        verbose_name="Значение атрибута"
+    )
+
+    class Meta:
+        verbose_name = "Атрибут товара"
+        verbose_name_plural = "Атрибуты товаров"
+        unique_together = ('product', 'attribute_value')
+
+    def __str__(self):
+        return f"{self.product.name} - {self.attribute_value.value}"
+
+class SizeChart(models.Model):
+    name = models.CharField(max_length=100, unique=True, verbose_name="Название")
+    description = models.TextField(blank=True, null=True, verbose_name="Описание")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+
+    class Meta:
+        verbose_name = "Таблица размеров"
+        verbose_name_plural = "Таблицы размеров"
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+    
+class SizeInfo(models.Model):
+    product = models.ForeignKey(
+        Product, 
+        on_delete=models.CASCADE,
+        related_name='size_info',
+        verbose_name="Продукт"
+    )
+    size = models.ForeignKey(
+        AttributeValue,
+        on_delete=models.CASCADE,
+        related_name='size_info',
+        verbose_name="Размер"
+    )
+    chest = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        null=True, 
+        blank=True,
+        verbose_name="Обхват груди"
+    )
+    waist = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        null=True, 
+        blank=True,
+        verbose_name="Обхват талии"
+    )
+    length = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        null=True, 
+        blank=True,
+        verbose_name="Длина"
+    )
+
+    class Meta:
+        verbose_name = "Размерная информация"
+        verbose_name_plural = "Размерные информации"
+        unique_together = ('product', 'size')
+
+    def __str__(self):
+        return f"{self.product.name} - {self.size.value}"
+
+
+
 class ProductBatch(models.Model):
     product = models.ForeignKey(
         Product,
@@ -70,16 +193,18 @@ class ProductBatch(models.Model):
         related_name='batches'
     )
     quantity = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)]
+        validators=[MinValueValidator(1)],
+        verbose_name="Количество"
     )
     purchase_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
-        blank=True
+        blank=True,
+        verbose_name="Цена закупки",
     )
-    supplier = models.CharField(max_length=255, blank=True)
-    expiration_date = models.DateField(null=True, blank=True)
+    supplier = models.CharField(max_length=255, blank=True, verbose_name="Поставщик")
+    expiration_date = models.DateField(null=True, blank=True, verbose_name="Дата истечения")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -109,11 +234,13 @@ class Stock(models.Model):
     product = models.OneToOneField(
         Product,
         on_delete=models.CASCADE,
-        related_name='stock'
+        related_name='stock',
+        verbose_name="Товар"
     )
     quantity = models.IntegerField(
         default=0,
-        validators=[MinValueValidator(0)]
+        validators=[MinValueValidator(0)],
+        verbose_name="Количество"
     )
     updated_at = models.DateTimeField(auto_now=True)
 

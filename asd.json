@@ -1,158 +1,526 @@
 {
-    "info": {
-        "name": "Store System API",
-        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-    },
-    "item": [
+  "info": {
+    "name": "Inventory API Collection",
+    "description": "Коллекция запросов для тестирования API инвентаризации. Все эндпоинты используют префикс /inventory.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Создание динамических атрибутов",
+      "item": [
         {
-            "name": "Inventory",
-            "item": [
-                {
-                    "name": "Stockkeeper Add Product and Batch",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\"name\": \"Кока-Кола 0.5л\", \"barcode\": \"5449000000996\", \"category_id\": 1, \"sale_price\": 89.90, \"quantity\": 100, \"expiration_date\": \"2025-12-31\", \"supplier\": \"ООО Напитки\", \"unit\": \"piece\", \"purchase_price\": 50.00}"
-                        },
-                        "url": {
-                            "raw": "http://127.0.0.1:8000/api/inventory/stockkeeper/add/",
-                            "host": ["127.0.0.1"],
-                            "port": "8000",
-                            "path": ["api", "inventory", "stockkeeper", "add", ""]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Create Category",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\"name\": \"Напитки\"}"
-                        },
-                        "url": {
-                            "raw": "http://127.0.0.1:8000/api/categories/",
-                            "host": ["127.0.0.1"],
-                            "port": "8000",
-                            "path": ["api", "categories", ""]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "List Products",
-                    "request": {
-                        "method": "GET",
-                        "header": [],
-                        "url": {
-                            "raw": "http://127.0.0.1:8000/api/products/?barcode=5449000000996",
-                            "host": ["127.0.0.1"],
-                            "port": "8000",
-                            "path": ["api", "products", ""],
-                            "query": [
-                                {
-                                    "key": "barcode",
-                                    "value": "5449000000996"
-                                }
-                            ]
-                        }
-                    },
-                    "response": []
-                }
-            ]
+          "name": "Создать тип атрибута 'Бренд'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Бренд\",\n  \"slug\": \"brand\",\n  \"is_filterable\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/attribute-types/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "attribute-types", ""]
+            },
+            "description": "Создаёт новый тип атрибута 'Бренд'."
+          }
         },
         {
-            "name": "Customers",
-            "item": [
-                {
-                    "name": "Create Customer",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\"full_name\": \"Иван Иванов\", \"phone\": \"+79991234567\"}"
-                        },
-                        "url": {
-                            "raw": "http://127.0.0.1:8000/api/customers/",
-                            "host": ["127.0.0.1"],
-                            "port": "8000",
-                            "path": ["api", "customers", ""]
-                        }
-                    },
-                    "response": []
-                }
-            ]
+          "name": "Добавить значение 'Nike' для атрибута 'Бренд'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attribute_type\": 1,\n  \"value\": \"Nike\",\n  \"slug\": \"nike\",\n  \"ordering\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/attribute-values/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "attribute-values", ""]
+            },
+            "description": "Добавляет значение 'Nike' для атрибута 'Бренд' (attribute_type=1)."
+          }
         },
         {
-            "name": "Sales",
-            "item": [
-                {
-                    "name": "Create Transaction (Debt)",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\"cashier\": 1, \"new_customer\": {\"full_name\": \"Петр Петров\", \"phone\": \"+79991234568\"}, \"total_amount\": 150.50, \"payment_method\": \"debt\", \"items\": [{\"product\": 1, \"quantity\": 2, \"price\": 75.25}]}"
-                        },
-                        "url": {
-                            "raw": "http://127.0.0.1:8000/api/transactions/",
-                            "host": ["127.0.0.1"],
-                            "port": "8000",
-                            "path": ["api", "transactions", ""]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Simple Sale",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\"product_id\": 1, \"quantity\": 2}"
-                        },
-                        "url": {
-                            "raw": "http://127.0.0.1:8000/api/sales/sell/",
-                            "host": ["127.0.0.1"],
-                            "port": "8000",
-                            "path": ["api", "sales", "sell", ""]
-                        }
-                    },
-                    "response": []
-                }
-            ]
+          "name": "Добавить значение 'Adidas' для атрибута 'Бренд'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attribute_type\": 1,\n  \"value\": \"Adidas\",\n  \"slug\": \"adidas\",\n  \"ordering\": 2\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/attribute-values/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "attribute-values", ""]
+            },
+            "description": "Добавляет значение 'Adidas' для атрибута 'Бренд' (attribute_type=1)."
+          }
+        },
+        {
+          "name": "Создать тип атрибута 'Размер'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Размер\",\n  \"slug\": \"size\",\n  \"is_filterable\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/attribute-types/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "attribute-types", ""]
+            },
+            "description": "Создаёт новый тип атрибута 'Размер'."
+          }
+        },
+        {
+          "name": "Добавить значение 'S' для атрибута 'Размер'",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attribute_type\": 2,\n  \"value\": \"S\",\n  \"slug\": \"s\",\n  \"ordering\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/attribute-values/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "attribute-values", ""]
+            },
+            "description": "Добавляет значение 'S' для атрибута 'Размер' (attribute_type=2)."
+          }
         }
-    ]
+      ]
+    },
+    {
+      "name": "2. Сканирование штрих-кода",
+      "item": [
+        {
+          "name": "Сканировать существующий товар",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/scan_barcode/?barcode=1234567890",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", "scan_barcode", ""],
+              "query": [
+                {
+                  "key": "barcode",
+                  "value": "1234567890"
+                }
+              ]
+            },
+            "description": "Сканирует существующий товар по штрих-коду."
+          }
+        },
+        {
+          "name": "Сканировать несуществующий товар",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/scan_barcode/?barcode=9999999999",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", "scan_barcode", ""],
+              "query": [
+                {
+                  "key": "barcode",
+                  "value": "9999999999"
+                }
+              ]
+            },
+            "description": "Сканирует несуществующий товар, возвращает форму для создания."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Создание нового товара с атрибутами",
+      "item": [
+        {
+          "name": "Создать товар с атрибутами и партией",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nike Air Max\",\n  \"barcode\": \"1234567890\",\n  \"category\": 1,\n  \"sale_price\": 12000.00,\n  \"attributes\": [\n    {\"attribute_id\": 1},\n    {\"attribute_id\": 4}\n  ],\n  \"batch_info\": {\n    \"quantity\": 50,\n    \"purchase_price\": 8000.00,\n    \"supplier\": \"Nike Russia\",\n    \"expiration_date\": null\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", ""]
+            },
+            "description": "Создаёт новый товар 'Nike Air Max' с атрибутами 'Nike' и 'M', а также партией."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Добавление партии к существующему товару",
+      "item": [
+        {
+          "name": "Добавить партию к существующему товару",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"barcode\": \"1234567890\",\n  \"batch_info\": {\n    \"quantity\": 25,\n    \"purchase_price\": 8200.00,\n    \"supplier\": \"Nike Russia\",\n    \"expiration_date\": null\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", ""]
+            },
+            "description": "Добавляет новую партию к существующему товару по штрих-коду."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Получение атрибутов для создания товара",
+      "item": [
+        {
+          "name": "Получить все доступные атрибуты",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/attribute-types/for_product_creation/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "attribute-types", "for_product_creation", ""]
+            },
+            "description": "Возвращает все доступные атрибуты для создания товара."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Продажа товара (списание со склада)",
+      "item": [
+        {
+          "name": "Продать товар",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/10/sell/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", "10", "sell", ""]
+            },
+            "description": "Продаёт 5 единиц товара с ID 10."
+          }
+        },
+        {
+          "name": "Ошибка при недостатке товара",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 100\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/10/sell/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", "10", "sell", ""]
+            },
+            "description": "Попытка продать больше товара, чем есть на складе."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Фильтрация и поиск товаров",
+      "item": [
+        {
+          "name": "Поиск по названию",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/?search=nike",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", ""],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "nike"
+                }
+              ]
+            },
+            "description": "Ищет товары по ключевому слову 'nike' в названии."
+          }
+        },
+        {
+          "name": "Фильтрация по категории",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/?category=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", ""],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Фильтрует товары по категории с ID 1."
+          }
+        },
+        {
+          "name": "Фильтрация по атрибутам",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/?attributes__attribute_type=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", ""],
+              "query": [
+                {
+                  "key": "attributes__attribute_type",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Фильтрует товары по атрибуту 'Бренд' (attribute_type=1)."
+          }
+        },
+        {
+          "name": "Комбинированный поиск",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/?search=nike&category=1&attributes__attribute_type=2",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", ""],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "nike"
+                },
+                {
+                  "key": "category",
+                  "value": "1"
+                },
+                {
+                  "key": "attributes__attribute_type",
+                  "value": "2"
+                }
+              ]
+            },
+            "description": "Комбинированный поиск по названию, категории и атрибутам."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Управление остатками",
+      "item": [
+        {
+          "name": "Получить товары с низким остатком",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/low_stock/?min_quantity=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", "low_stock", ""],
+              "query": [
+                {
+                  "key": "min_quantity",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Возвращает товары с остатком <= 5."
+          }
+        },
+        {
+          "name": "Корректировка остатков",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 50,\n  \"reason\": \"Инвентаризация\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/stock/5/adjust/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "stock", "5", "adjust", ""]
+            },
+            "description": "Корректирует остатки товара с ID 5 до 50."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Работа с партиями",
+      "item": [
+        {
+          "name": "Получить партии с истекающим сроком",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/batches/expiring_soon/?days=30",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "batches", "expiring_soon", ""],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30"
+                }
+              ]
+            },
+            "description": "Возвращает партии, срок годности которых истекает в течение 30 дней."
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Статистика склада",
+      "item": [
+        {
+          "name": "Общая статистика",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/inventory/stats/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "stats", ""]
+            },
+            "description": "Возвращает общую статистику по складу."
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Размерная информация",
+      "item": [
+        {
+          "name": "Добавить размерную информацию для одежды",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": 10,\n  \"size\": 4,\n  \"chest\": 100,\n  \"waist\": 80,\n  \"length\": 70\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/size-info/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "size-info", ""]
+            },
+            "description": "Добавляет размерную информацию для товара с ID 10 и размером 'M'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Обновление товара с новыми атрибутами",
+      "item": [
+        {
+          "name": "Добавить новый атрибут к товару",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attributes\": [\n    {\"attribute_id\": 1},\n    {\"attribute_id\": 4},\n    {\"attribute_id\": 8}\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/inventory/products/10/",
+              "host": ["{{baseUrl}}"],
+              "path": ["inventory", "products", "10", ""]
+            },
+            "description": "Обновляет атрибуты товара с ID 10, добавляя новый атрибут 'Черный'."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "description": "Базовый URL вашего API"
+    }
+  ]
 }

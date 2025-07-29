@@ -24,7 +24,7 @@ SECRET_KEY = 'django-insecure-f-b3n$#vmkg9)$ydy&527z$sb76f6!$#n4yob^ivutz^&!%98!
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['mahallaxoj.pythonanywhere.com', '127.0.0.1']
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -33,7 +33,13 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
+
 }
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+]
 
 from datetime import timedelta
 
@@ -55,12 +61,15 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'customers',
     'inventory',
     'purchases',
     'sales',
     'drf_yasg',
-    'users'
+    'users',
+    'corsheaders',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
@@ -71,7 +80,17 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
 ]
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+# CORS_ALLOWED_ORIGINS = [
+#             "http://localhost:3000",  # Example for a React frontend
+#             "https://yourfrontend.com",
+#             # Add other allowed origins
+#         ]
 
 ROOT_URLCONF = 'sompos.urls'
 
