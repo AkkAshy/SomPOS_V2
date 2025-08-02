@@ -99,16 +99,12 @@ class AttributeValueViewSet(ModelViewSet):
     filterset_fields = ['attribute_type']
     search_fields = ['value']
 
-
 class ProductViewSet(ModelViewSet):
-    """
-    ViewSet для управления товарами с полной логикой создания и управления
-    """
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ['name', 'barcode', 'category__name']
-    filterset_fields = ['category', 'attributes__attribute_type']
+    filterset_fields = ['category']
     ordering_fields = ['name', 'sale_price', 'created_at']
     ordering = ['-created_at']
 
@@ -116,28 +112,26 @@ class ProductViewSet(ModelViewSet):
         return Product.objects.select_related(
             'category', 'stock'
         ).prefetch_related(
-            'attributes',
-            'productattribute_set__attribute_value__attribute_type',
-            'size_info__size',
+            # 'attributes',
+            # 'productattribute_set__attribute_value__attribute_type',
+            'size',
             'batches'
         )
-
-    @swagger_auto_schema(
-        operation_description="Получить все товары с остатками и атрибутами",
-        responses={200: ProductSerializer(many=True)}
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
 
     @swagger_auto_schema(
         operation_description="Создать новый товар или добавить партию существующего",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Штрих-код'),
+                'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Штрих-код', nullable=True),
                 'name': openapi.Schema(type=openapi.TYPE_STRING, description='Название товара'),
                 'category': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID категории'),
                 'sale_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена продажи'),
+                'size': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='ID существующей записи размерной информации',
+                    nullable=True
+                ),
                 'attributes': openapi.Schema(
                     type=openapi.TYPE_ARRAY,
                     items=openapi.Schema(
@@ -153,7 +147,7 @@ class ProductViewSet(ModelViewSet):
                         'quantity': openapi.Schema(type=openapi.TYPE_INTEGER),
                         'purchase_price': openapi.Schema(type=openapi.TYPE_NUMBER),
                         'supplier': openapi.Schema(type=openapi.TYPE_STRING),
-                        'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date')
+                        'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date', nullable=True)
                     }
                 )
             }
@@ -169,9 +163,11 @@ class ProductViewSet(ModelViewSet):
         Создание товара с логикой:
         1. Если штрих-код существует - добавляем партию
         2. Если нет - создаем новый товар
+        3. Обрабатываем size для связи с существующей размерной информацией
         """
         barcode = request.data.get('barcode')
         batch_info = request.data.pop('batch_info', {})
+        size_id = request.data.pop('size_id', None)  # Извлекаем size_id
         
         # Проверяем существование товара по штрих-коду
         if barcode:
@@ -193,10 +189,23 @@ class ProductViewSet(ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST
                         )
                 
+                # Обрабатываем size для существующего товара
+                if size_id:
+                    try:
+                        size_instance = SizeInfo.objects.get(id=size_id)
+                        existing_product.size = size_instance  # Прямое присваивание
+                        existing_product.save()
+                        logger.info(f"Добавлен размер {size_instance.size} для товара {existing_product.name}")
+                    except SizeInfo.DoesNotExist:
+                        return Response(
+                            {'size_error': _('Размерная информация не найдена')},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                
                 serializer = self.get_serializer(existing_product)
                 return Response({
                     'product': serializer.data,
-                    'message': _('Партия добавлена к существующему товару'),
+                    'message': _('Партия и/или размер добавлены к существующему товару'),
                     'action': 'batch_added'
                 }, status=status.HTTP_200_OK)
                 
@@ -208,8 +217,18 @@ class ProductViewSet(ModelViewSet):
         if serializer.is_valid():
             product = serializer.save()
             
-            # Добавляем атрибуты
-            self._handle_product_attributes(product, request.data.get('attributes', []))
+            # Обрабатываем size
+            if size_id:
+                try:
+                    size_instance = SizeInfo.objects.get(id=size_id)
+                    product.size = size_instance  # Прямое присваивание
+                    product.save()
+                    logger.info(f"Добавлен размер {size_instance.size} для товара {product.name}")
+                except SizeInfo.DoesNotExist:
+                    return Response(
+                        {'size_error': _('Размерная информация не найдена')},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             # Создаем партию если указана
             if batch_info:
@@ -221,6 +240,11 @@ class ProductViewSet(ModelViewSet):
                 if batch_serializer.is_valid():
                     batch_serializer.save()
                     logger.info(f"Создана партия для нового товара {product.name}")
+                else:
+                    return Response(
+                        {'batch_errors': batch_serializer.errors},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
             # Возвращаем обновленные данные
             updated_serializer = self.get_serializer(product)
@@ -486,22 +510,30 @@ class StockViewSet(ModelViewSet):
             'reason': reason
         })
 
-
 class SizeInfoViewSet(ModelViewSet):
-    """
-    ViewSet для управления размерной информацией
-    """
     serializer_class = SizeInfoSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['product', 'size']
 
     def get_queryset(self):
-        return SizeInfo.objects.select_related('product', 'size').all()
+        return SizeInfo.objects.select_related('product').all()
 
+    @swagger_auto_schema(
+        operation_description="Создать новую размерную информацию",
+        request_body=SizeInfoSerializer,
+        responses={
+            201: SizeInfoSerializer,
+            400: 'Ошибка валидации'
+        }
+    )
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
-
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            size = serializer.save()
+            logger.info(f"Создана размерная информация: {size.size}")
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # Дополнительные утилитные views
 

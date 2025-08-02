@@ -1,3 +1,4 @@
+#sales/serializers.py
 from rest_framework import serializers
 from .models import Transaction, TransactionItem
 from inventory.models import Product
@@ -62,30 +63,6 @@ class TransactionSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        """
-        Creates a new Transaction and its related TransactionItems.
-
-        Takes a validated dictionary with the following keys:
-            - items: a list of dictionaries with keys "product" and "quantity"
-            - customer_id: an int representing the Customer ID
-            - new_customer: a dictionary with keys "full_name" and "phone"
-            - cashier: a User object representing the cashier
-            - total_amount: a float representing the total amount
-            - payment_method: a string representing the payment method
-            - status: a string representing the status
-
-        Creates a new Transaction with the given parameters and its related
-        TransactionItems. If new_customer is given, it creates a new Customer
-        object and assigns it to the transaction. If customer_id is given, it
-        assigns the given Customer object to the transaction. Otherwise, it sets
-        the customer to None.
-
-        For each item in the items list, it creates a new TransactionItem with
-        the given product and quantity, and reduces the quantity of the product
-        in the stock.
-
-        Returns the created Transaction object.
-        """
         items_data = validated_data.pop('items')
         customer_id = validated_data.pop('customer_id', None)
         new_customer = validated_data.pop('new_customer', None)
@@ -114,15 +91,15 @@ class TransactionSerializer(serializers.ModelSerializer):
                 quantity=quantity,
                 price=product.sale_price
             )
-            product.stock.sell(quantity)
+            # Удаляем product.stock.sell(quantity), так как это делается в process_sale
             logger.info(
                 f"Transaction item created by {user.username}. Transaction ID: {transaction.id}, "
                 f"Product ID: {product.id}, Quantity: {quantity}"
             )
 
+        transaction.process_sale()
+
         logger.info(
             f"Transaction created by {user.username}. ID: {transaction.id}, Total: {transaction.total_amount}"
         )
         return transaction
-    
-

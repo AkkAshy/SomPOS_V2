@@ -61,35 +61,20 @@ class SizeChartSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'values']
 
 class SizeInfoSerializer(serializers.ModelSerializer):
-    size = serializers.CharField(source='size.value', read_only=True)
+    size = serializers.CharField()
 
     class Meta:
         model = SizeInfo
-        fields = ['id', 'product', 'size', 'chest', 'waist', 'length']
+        fields = ['id','size', 'chest', 'waist', 'length']
         read_only_fields = ['id']
-        extra_kwargs = {
-            'chest': {'required': False, 'allow_null': True},
-            'waist': {'required': False, 'allow_null': True},
-            'length': {'required': False, 'allow_null': True}
-        }
         swagger_schema_fields = {
             'example': {
-                'product': 1,
-                'size': 'M',
+                'size': 'XXL',
                 'chest': 100,
                 'waist': 80,
                 'length': 70
             }
         }
-
-    def validate_size(self, value):
-        if value and not AttributeType.objects.filter(slug='size', values__id=value.id).exists():
-            raise serializers.ValidationError(
-                _("Размер должен быть значением атрибута типа 'size'"),
-                code='invalid_size'
-            )
-        return value
-
 
 
 ############################################################## Продукты #############################################################
@@ -113,9 +98,10 @@ class ProductBatchSerializer(serializers.ModelSerializer):
         ]
 
     def get_size(self, obj):
-        """Возвращает размер из атрибутов товара"""
-        size_attr = obj.product.attributes.filter(attribute_type__slug='size').first()
-        return size_attr.value if size_attr else None
+        """Возвращает размер из поля size модели Product"""
+        if obj.product.size:  # Проверяем, есть ли связанный размер
+            return obj.product.size.size  # Возвращаем значение поля size из SizeInfo
+        return None
 
     def validate_quantity(self, value):
         if value <= 0:
@@ -138,47 +124,30 @@ class ProductBatchSerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
-    attributes = ProductAttributeSerializer(
-        source='productattribute_set',
-        many=True,
-        read_only=False,  # Разрешаем запись
-        help_text=_('Атрибуты товара')
-    )
-    size = serializers.SerializerMethodField()
-    
-    # Группировка атрибутов по типам (для удобства фронтенда)
-    grouped_attributes = serializers.SerializerMethodField()
-    
+    size = SizeInfoSerializer(read_only=True)  # Убираем many=True
     current_stock = serializers.IntegerField(
         source='stock.quantity',
         read_only=True,
         help_text=_('Текущий остаток на складе')
     )
-
-    size_info = SizeInfoSerializer(
-        source='size_info',
-        many=True,
-        read_only=True,
-        help_text=_('Размерные характеристики товара')
+    size_id = serializers.PrimaryKeyRelatedField(
+        source='size',
+        queryset=SizeInfo.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True  # Разрешаем null, так как size может быть пустым
     )
-
     unit = serializers.ChoiceField(
         choices=Product.UNIT_CHOICES,
         read_only=True,
         help_text=_('Единица измерения товара')
     )
-
     batches = ProductBatchSerializer(
-        source='batches',
         many=True,
         read_only=True,
         help_text=_('Партии товара')
     )
 
-    @swagger_serializer_method(serializer_or_field=serializers.IntegerField)
-    def get_current_stock(self, obj):
-        return obj.stock.quantity if hasattr(obj, 'stock') else 0
-    
     class Meta:
         model = Product
         fields = [
@@ -188,11 +157,9 @@ class ProductSerializer(serializers.ModelSerializer):
             'category', 
             'category_name', 
             'sale_price',
-            'attributes',
-            'grouped_attributes',
             'created_at',
             'size',
-            'size_info',
+            'size_id',
             'unit',
             'current_stock',
             'batches'
@@ -206,30 +173,6 @@ class ProductSerializer(serializers.ModelSerializer):
                 'allow_blank': True
             }
         }
-        swagger_schema_fields = {
-            'example': {
-                'name': 'Кока-Кола 0.5л',
-                'barcode': '5449000000996',
-                'category': 1,
-                'unit': 'piece',
-                'sale_price': 89.90
-            }
-        }
-
-    def get_grouped_attributes(self, obj):
-        """Возвращает атрибуты в сгруппированном виде, например:
-        {
-            "Цвет": ["Черный", "Белый"],
-            "Размер": ["XL", "L"]
-        }
-        """
-        grouped = {}
-        for attr in obj.productattribute_set.select_related('attribute__attribute_type').all():
-            attr_type = attr.attribute.attribute_type.name
-            if attr_type not in grouped:
-                grouped[attr_type] = []
-            grouped[attr_type].append(attr.attribute.value)
-        return grouped
 
     def validate_sale_price(self, value):
         if value < 0:
@@ -265,6 +208,22 @@ class ProductSerializer(serializers.ModelSerializer):
             )
             
         return value
+    
+    def create(self, validated_data):
+        size = validated_data.pop('size', None)  # size_id mapped to 'size' via source
+        product = super().create(validated_data)
+        if size:
+            product.size = size  # Прямое присваивание для ForeignKey
+            product.save()
+        return product
+    
+    def update(self, instance, validated_data):
+        size = validated_data.pop('size', None)
+        product = super().update(instance, validated_data)
+        if size is not None:
+            product.size = size  # Прямое присваивание для ForeignKey
+            product.save()
+        return product
 
 
 class StockSerializer(serializers.ModelSerializer):

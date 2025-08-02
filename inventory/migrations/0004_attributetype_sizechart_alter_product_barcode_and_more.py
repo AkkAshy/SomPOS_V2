@@ -151,8 +151,8 @@ class Migration(migrations.Migration):
                 ('chest', models.PositiveSmallIntegerField(blank=True, null=True, validators=[django.core.validators.MinValueValidator(1)], verbose_name='Обхват груди')),
                 ('waist', models.PositiveSmallIntegerField(blank=True, null=True, validators=[django.core.validators.MinValueValidator(1)], verbose_name='Обхват талии')),
                 ('length', models.PositiveSmallIntegerField(blank=True, null=True, validators=[django.core.validators.MinValueValidator(1)], verbose_name='Длина')),
-                ('product', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='size_info', to='inventory.product', verbose_name='Продукт')),
-                ('size', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='size_info', to='inventory.attributevalue', verbose_name='Размер')),
+                ('product', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='size', to='inventory.product', verbose_name='Продукт')),
+                ('size', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='size', to='inventory.attributevalue', verbose_name='Размер')),
             ],
             options={
                 'verbose_name': 'Размерная информация',

@@ -45,6 +45,8 @@ urlpatterns = [
     path('sales/', include('sales.urls')),
 
     path('users/', include('users.urls')),
+    # Аналитика
+    path('analytics/', include('analytics.urls')),
 
     # Документация
     re_path(r'^swagger(?P<format>\.json|\.yaml)$',

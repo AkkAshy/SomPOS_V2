@@ -7,6 +7,47 @@ from django.db.models import Sum, F
 
 logger = logging.getLogger('inventory')
 
+class SizeInfo(models.Model):
+    SIZE_CHOICES = [
+        ('S', 'S'),
+        ('M', 'M'),
+        ('L', 'L'),
+        ('XL', 'XL'),
+        ('XXL', 'XXL'),
+    ]
+
+
+    
+    size = models.CharField(max_length=50, verbose_name="Размер")
+
+    chest = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        null=True, 
+        blank=True,
+        verbose_name="Обхват груди"
+    )
+    waist = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        null=True, 
+        blank=True,
+        verbose_name="Обхват талии"
+    )
+    length = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        null=True, 
+        blank=True,
+        verbose_name="Длина"
+    )
+
+    class Meta:
+        verbose_name = "Размерная информация"
+        verbose_name_plural = "Размерные информации"
+        unique_together = ('size',)
+
+    def __str__(self):
+        return f"{self.size}"
+
+
 class ProductCategory(models.Model):
     name = models.CharField(max_length=255, unique=True, verbose_name="Название")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
@@ -95,6 +136,7 @@ class Product(models.Model):
         related_name='products',
         verbose_name="Атрибуты"
     )
+    size = models.ForeignKey(SizeInfo, on_delete=models.SET_NULL, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
@@ -144,46 +186,6 @@ class SizeChart(models.Model):
     def __str__(self):
         return self.name
     
-class SizeInfo(models.Model):
-    product = models.ForeignKey(
-        Product, 
-        on_delete=models.CASCADE,
-        related_name='size_info',
-        verbose_name="Продукт"
-    )
-    size = models.ForeignKey(
-        AttributeValue,
-        on_delete=models.CASCADE,
-        related_name='size_info',
-        verbose_name="Размер"
-    )
-    chest = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(1)],
-        null=True, 
-        blank=True,
-        verbose_name="Обхват груди"
-    )
-    waist = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(1)],
-        null=True, 
-        blank=True,
-        verbose_name="Обхват талии"
-    )
-    length = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(1)],
-        null=True, 
-        blank=True,
-        verbose_name="Длина"
-    )
-
-    class Meta:
-        verbose_name = "Размерная информация"
-        verbose_name_plural = "Размерные информации"
-        unique_together = ('product', 'size')
-
-    def __str__(self):
-        return f"{self.product.name} - {self.size.value}"
-
 
 
 class ProductBatch(models.Model):

@@ -1,408 +1,135 @@
 {
-	"info": {
-		"_postman_id": "2b655576-8443-48ba-83d1-68950b8f3911",
-		"name": "SomPOS Copy",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"_exporter_id": "42987072",
-		"_collection_link": "https://imax55.postman.co/workspace/IMax-Workspace~7df4092a-f84d-4919-8119-e0f680fafc98/collection/42987072-2b655576-8443-48ba-83d1-68950b8f3911?action=share&source=collection_link&creator=42987072"
-	},
-	"item": [
-		{
-			"name": "Продукты",
-			"item": [
-				{
-					"name": "Склад",
-					"item": []
-				},
-				{
-					"name": "Кассир",
-					"item": [
-						{
-							"name": "Продукты Поиск по имени",
-							"protocolProfileBehavior": {
-								"disableBodyPruning": true
-							},
-							"request": {
-								"method": "GET",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "{\r\n    \"name\": \"Cola\",\r\n    \"category\": 1,\r\n    \"unit\": \"piece\",\r\n    \"sale_price\": \"5000.00\"\r\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}inventory/products/search/?q=Cola",
-									"host": [
-										"{{baseUrl}}inventory"
-									],
-									"path": [
-										"products",
-										"search",
-										""
-									],
-									"query": [
-										{
-											"key": "q",
-											"value": "Cola"
-										}
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Поиск по штрихкоду Copy",
-							"protocolProfileBehavior": {
-								"disableBodyPruning": true
-							},
-							"request": {
-								"method": "GET",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}inventory/products/barcode/?barcode=5449000000996",
-									"host": [
-										"{{baseUrl}}inventory"
-									],
-									"path": [
-										"products",
-										"barcode",
-										""
-									],
-									"query": [
-										{
-											"key": "barcode",
-											"value": "5449000000996"
-										}
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Список товаров Copy",
-							"request": {
-								"method": "GET",
-								"header": [
-									{
-										"key": "Authorization",
-										"value": "Bearer {{token}}"
-									}
-								],
-								"url": {
-									"raw": "{{baseUrl}}inventory/products/",
-									"host": [
-										"{{baseUrl}}inventory"
-									],
-									"path": [
-										"products",
-										""
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Поиск по названию Copy",
-							"protocolProfileBehavior": {
-								"disableBodyPruning": true
-							},
-							"request": {
-								"method": "GET",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}/inventory/products/search/?q=кола",
-									"host": [
-										"{{baseUrl}}"
-									],
-									"path": [
-										"inventory",
-										"products",
-										"search",
-										""
-									],
-									"query": [
-										{
-											"key": "q",
-											"value": "кола"
-										}
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Продажа обычная",
-							"request": {
-								"method": "POST",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "{\r\n    \"items\": [\r\n        {\r\n            \"product\": 9\r\n        },\r\n        {\r\n            \"product\": 1\r\n        }\r\n    ],\r\n    \"payment_method\": \"cash\"\r\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}sales/transactions/",
-									"host": [
-										"{{baseUrl}}sales"
-									],
-									"path": [
-										"transactions",
-										""
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Продажа в долг если покупатель существует",
-							"request": {
-								"method": "POST",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "{\r\n  \"cashier\": 2,\r\n  \"payment_method\": \"debt\",\r\n  \"customer_id\": 1,\r\n  \"total_amount\": 179.80,\r\n  \"items\": [\r\n    {\r\n      \"product\": 2,\r\n      \"quantity\": 2,\r\n      \"price\": 89.90\r\n    }\r\n  ]\r\n}\r\n",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}sales/transactions/",
-									"host": [
-										"{{baseUrl}}sales"
-									],
-									"path": [
-										"transactions",
-										""
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Продажа в долг новому покупателю (создание на лету)",
-							"request": {
-								"method": "POST",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "{\r\n  \"cashier\": 2,\r\n  \"payment_method\": \"debt\",\r\n  \"new_customer\": {\r\n    \"full_name\": \"Иванов Иван\",\r\n    \"phone\": \"+998901234567\"\r\n  },\r\n  \"total_amount\": 89.90,\r\n  \"items\": [\r\n    {\r\n      \"product\": 3,\r\n      \"quantity\": 1,\r\n      \"price\": 89.90\r\n    }\r\n  ]\r\n}\r\n",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}sales/transactions/",
-									"host": [
-										"{{baseUrl}}sales"
-									],
-									"path": [
-										"transactions",
-										""
-									]
-								}
-							},
-							"response": []
-						},
-						{
-							"name": "Продукты Поиск штрихкоду",
-							"protocolProfileBehavior": {
-								"disableBodyPruning": true
-							},
-							"request": {
-								"method": "GET",
-								"header": [],
-								"body": {
-									"mode": "raw",
-									"raw": "{\r\n    \"name\": \"Cola\",\r\n    \"category\": 1,\r\n    \"unit\": \"piece\",\r\n    \"sale_price\": \"5000.00\"\r\n}",
-									"options": {
-										"raw": {
-											"language": "json"
-										}
-									}
-								},
-								"url": {
-									"raw": "{{baseUrl}}inventory/products/search/by-barcode/?barcode=5449000000996",
-									"host": [
-										"{{baseUrl}}inventory"
-									],
-									"path": [
-										"products",
-										"search",
-										"by-barcode",
-										""
-									],
-									"query": [
-										{
-											"key": "barcode",
-											"value": "5449000000996"
-										}
-									]
-								}
-							},
-							"response": []
-						}
-					]
-				}
-			]
-		},
-		{
-			"name": "Авторизация",
-			"item": [
-				{
-					"name": "Авторизация",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"username\": \"admin\",\n    \"password\": \"admin123\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}users/login/",
-							"host": [
-								"{{baseUrl}}users"
-							],
-							"path": [
-								"login",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Регестрация",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"username\": \"Baton\",\n    \"email\": \"akkanat@mail.ru\",\n    \"groups\": [\"stockkeeper\"],\n    \"first_name\": \"Akkanat\",\n    \"last_name\": \"Ashirepov\",\n    \"password\": \"admin123\",\n    \"employee\": {\n        \"role\": \"stockkeeper\",\n        \"phone\": \"+1234567890\",\n        \"photo\": null\n    }\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}users/register/",
-							"host": [
-								"{{baseUrl}}users"
-							],
-							"path": [
-								"register",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Refresh",
-					"request": {
-						"auth": {
-							"type": "noauth"
-						},
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"refresh\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc2MTk4OTIyMywiaWF0IjoxNzUzMzQ5MjIzLCJqdGkiOiI3ZDMzMGVhMmM2OTk0MDVlYWQ2Y2QwOTMxN2M3MTlmNCIsInVzZXJfaWQiOjF9.6E9bXVsyFla1XKodh4xkSXIzUvna5c0kYC3qdE1C9B0\"\n}\n",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}users/token/refresh/",
-							"host": [
-								"{{baseUrl}}users"
-							],
-							"path": [
-								"token",
-								"refresh",
-								""
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		}
-	],
-	"auth": {
-		"type": "bearer",
-		"bearer": [
-			{
-				"key": "token",
-				"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzU4NzEzMTY5LCJpYXQiOjE3NTM1MjkxNjksImp0aSI6ImU0NjlkY2U1N2NmNDQ1ZDZiZjI3OGJjOWEyYTZiMTZlIiwidXNlcl9pZCI6MX0.pAG5UnmjeIcHxv7N8d_Qx4bFkRaNmJzEm9o37KChWtA",
-				"type": "string"
-			}
-		]
-	},
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"packages": {},
-				"exec": [
-					""
-				]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"packages": {},
-				"exec": [
-					""
-				]
-			}
-		}
-	],
-	"variable": [
-		{
-			"key": "baseUrl",
-			"value": "http://127.0.0.1:8000/",
-			"type": "string"
-		}
-	]
+  "info": {
+    "name": "Analytics API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Sales Summary",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/analytics/sales/?date_gte=2025-07-01&date_lte=2025-08-01&payment_method=cash",
+          "host": ["{{base_url}}"],
+          "path": ["analytics", "sales", ""],
+          "query": [
+            { "key": "date_gte", "value": "2025-07-01" },
+            { "key": "date_lte", "value": "2025-08-01" },
+            { "key": "payment_method", "value": "cash" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Sales Summary Aggregated",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/analytics/sales/summary/?start_date=2025-07-01&end_date=2025-08-01",
+          "host": ["{{base_url}}"],
+          "path": ["analytics", "sales", "summary", ""],
+          "query": [
+            { "key": "start_date", "value": "2025-07-01" },
+            { "key": "end_date", "value": "2025-08-01" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Product Analytics",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/analytics/products/?product=1&date_gte=2025-07-01",
+          "host": ["{{base_url}}"],
+          "path": ["analytics", "products", ""],
+          "query": [
+            { "key": "product", "value": "1" },
+            { "key": "date_gte", "value": "2025-07-01" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Top Products",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/analytics/products/top_products/?limit=5&start_date=2025-07-01",
+          "host": ["{{base_url}}"],
+          "path": ["analytics", "products", "top_products", ""],
+          "query": [
+            { "key": "limit", "value": "5" },
+            { "key": "start_date", "value": "2025-07-01" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Customer Analytics",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/analytics/customers/?customer=1&date_gte=2025-07-01",
+          "host": ["{{base_url}}"],
+          "path": ["analytics", "customers", ""],
+          "query": [
+            { "key": "customer", "value": "1" },
+            { "key": "date_gte", "value": "2025-07-01" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Top Customers",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/analytics/customers/top_customers/?limit=5&start_date=2025-07-01",
+          "host": ["{{base_url}}"],
+          "path": ["analytics", "customers", "top_customers", ""],
+          "query": [
+            { "key": "limit", "value": "5" },
+            { "key": "start_date", "value": "2025-07-01" }
+          ]
+        }
+      }
+    }
+  ]
 }
