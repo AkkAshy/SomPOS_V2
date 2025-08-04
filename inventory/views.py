@@ -11,6 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 import logging
+from django.core.exceptions import ValidationError
 
 from .models import (
     Product, ProductCategory, Stock, ProductBatch, 
@@ -20,7 +21,8 @@ from .models import (
 from .serializers import (
     ProductSerializer, ProductCategorySerializer, StockSerializer,
     ProductBatchSerializer, AttributeTypeSerializer, AttributeValueSerializer,
-    ProductAttributeSerializer, SizeChartSerializer, SizeInfoSerializer
+    ProductAttributeSerializer, SizeChartSerializer, SizeInfoSerializer,
+    ProductMultiSizeCreateSerializer
 )
 
 from .filters import ProductFilter, ProductBatchFilter, StockFilter
@@ -119,27 +121,18 @@ class ProductViewSet(ModelViewSet):
         )
 
     @swagger_auto_schema(
-        operation_description="Создать новый товар или добавить партию существующего",
+        operation_description="Создать товары для множественных размеров",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                'barcode': openapi.Schema(type=openapi.TYPE_STRING, description='Штрих-код', nullable=True),
-                'name': openapi.Schema(type=openapi.TYPE_STRING, description='Название товара'),
+                'name': openapi.Schema(type=openapi.TYPE_STRING, description='Базовое название товара'),
                 'category': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID категории'),
                 'sale_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена продажи'),
-                'size': openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description='ID существующей записи размерной информации',
-                    nullable=True
-                ),
-                'attributes': openapi.Schema(
+                'unit': openapi.Schema(type=openapi.TYPE_STRING, description='Единица измерения'),
+                'size_ids': openapi.Schema(
                     type=openapi.TYPE_ARRAY,
-                    items=openapi.Schema(
-                        type=openapi.TYPE_OBJECT,
-                        properties={
-                            'attribute_id': openapi.Schema(type=openapi.TYPE_INTEGER)
-                        }
-                    )
+                    items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                    description='Массив ID размеров'
                 ),
                 'batch_info': openapi.Schema(
                     type=openapi.TYPE_OBJECT,
@@ -148,15 +141,92 @@ class ProductViewSet(ModelViewSet):
                         'purchase_price': openapi.Schema(type=openapi.TYPE_NUMBER),
                         'supplier': openapi.Schema(type=openapi.TYPE_STRING),
                         'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date', nullable=True)
-                    }
+                    },
+                    required=[]
                 )
-            }
+            },
+            required=['name', 'category', 'sale_price', 'size_ids']
         ),
         responses={
-            201: ProductSerializer,
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'products': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_OBJECT)
+                    ),
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                    'count': openapi.Schema(type=openapi.TYPE_INTEGER)
+                }
+            ),
             400: 'Ошибка валидации'
         }
     )
+
+# {
+#     "name": "Футболка Армани",
+#     "category": 1,
+#     "sale_price": 150000.00,
+#     "unit": "piece",
+#     "size_ids": [1, 2, 3, 4],  // ID размеров S, M, L, XL
+#     "batch_info": {
+#         "quantity": 10,
+#         "purchase_price": 100000.00,
+#         "supplier": "Армани Official",
+#         "expiration_date": null
+#     }
+# }
+
+
+    @action(detail=False, methods=['post'])
+    def create_multi_size(self, request):
+        """
+        Создание товаров с множественными размерами.
+        Каждый размер создается как отдельный Product с уникальным штрих-кодом.
+        """
+        serializer = ProductMultiSizeCreateSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            try:
+                with transaction.atomic():
+                    created_products = serializer.save()
+                
+                # Сериализуем созданные товары для ответа  
+                products_data = ProductSerializer(created_products, many=True).data
+                
+                logger.info(f"Создано {len(created_products)} товаров с размерами")
+                
+                return Response({
+                    'products': products_data,
+                    'message': _('Товары успешно созданы для всех размеров'),
+                    'count': len(created_products),
+                    'action': 'multi_size_products_created'
+                }, status=status.HTTP_201_CREATED)
+                
+            except Exception as e:
+                logger.error(f"Ошибка при создании товаров с размерами: {str(e)}")
+                return Response({
+                    'error': _('Ошибка при создании товаров'),
+                    'details': str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# Также добавь этот вспомогательный endpoint для получения размеров
+    @action(detail=False, methods=['get'])
+    def available_sizes(self, request):
+        """
+        Получить все доступные размеры для создания товаров
+        """
+        sizes = SizeInfo.objects.all().order_by('size')
+        serializer = SizeInfoSerializer(sizes, many=True)
+        
+        return Response({
+            'sizes': serializer.data,
+            'count': sizes.count(),
+            'message': _('Доступные размеры для товаров')
+        })
+    
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         """
@@ -193,7 +263,7 @@ class ProductViewSet(ModelViewSet):
                 if size_id:
                     try:
                         size_instance = SizeInfo.objects.get(id=size_id)
-                        existing_product.size = size_instance  # Прямое присваивание
+                        existing_product.size = size_instance
                         existing_product.save()
                         logger.info(f"Добавлен размер {size_instance.size} для товара {existing_product.name}")
                     except SizeInfo.DoesNotExist:
@@ -201,6 +271,9 @@ class ProductViewSet(ModelViewSet):
                             {'size_error': _('Размерная информация не найдена')},
                             status=status.HTTP_400_BAD_REQUEST
                         )
+                
+                # Генерируем комбинированное изображение после обновления
+                existing_product.generate_label()
                 
                 serializer = self.get_serializer(existing_product)
                 return Response({
@@ -215,13 +288,16 @@ class ProductViewSet(ModelViewSet):
         # Создаем новый товар
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
-            product = serializer.save()
+            try:
+                product = serializer.save()
+            except ValidationError as e:
+                return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
             
             # Обрабатываем size
             if size_id:
                 try:
                     size_instance = SizeInfo.objects.get(id=size_id)
-                    product.size = size_instance  # Прямое присваивание
+                    product.size = size_instance
                     product.save()
                     logger.info(f"Добавлен размер {size_instance.size} для товара {product.name}")
                 except SizeInfo.DoesNotExist:
@@ -246,6 +322,9 @@ class ProductViewSet(ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
+            # Генерируем комбинированное изображение после создания
+            product.generate_label()
+            
             # Возвращаем обновленные данные
             updated_serializer = self.get_serializer(product)
             return Response({

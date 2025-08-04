@@ -24,7 +24,7 @@ SECRET_KEY = 'django-insecure-f-b3n$#vmkg9)$ydy&527z$sb76f6!$#n4yob^ivutz^&!%98!
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.168.0.1:8000', '127.0.0.1']
+ALLOWED_HOSTS = ['mahallaxoj.pythonanywhere.com', '127.0.0.1']
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -84,13 +84,15 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
-# CORS_ALLOWED_ORIGINS = [
-#             "http://localhost:3000",  # Example for a React frontend
-#             "https://yourfrontend.com",
-#             # Add other allowed origins
-#         ]
+CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
+
 
 ROOT_URLCONF = 'sompos.urls'
 
@@ -165,9 +167,21 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'file': {
             'level': 'INFO',
