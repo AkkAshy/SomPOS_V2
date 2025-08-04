@@ -595,7 +595,7 @@ class SizeInfoViewSet(ModelViewSet):
     filterset_fields = ['product', 'size']
 
     def get_queryset(self):
-        return SizeInfo.objects.select_related('product').all()
+        return SizeInfo.objects.all()
 
     @swagger_auto_schema(
         operation_description="Создать новую размерную информацию",

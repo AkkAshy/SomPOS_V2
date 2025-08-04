@@ -2,6 +2,7 @@ from .models import Customer
 from .serializers import CustomerSerializer
 from rest_framework import viewsets
 from drf_yasg.utils import swagger_auto_schema
+from rest_framework.response import Response
 
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
@@ -16,4 +17,14 @@ class CustomerViewSet(viewsets.ModelViewSet):
         }
     )
     def create(self, request):
-        return super().create(request)
+
+        number = request.data.get('number')
+
+        if Customer.objects.filter(number=number).exists():
+            return Response(
+                {"detail": "Клиент с таким номером уже существует."},
+                status=400
+            )
+        else:
+            return super().create(request)
+        # return super().create(request)
