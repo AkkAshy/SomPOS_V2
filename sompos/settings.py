@@ -34,6 +34,8 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10
 
 }
 
@@ -65,7 +67,7 @@ INSTALLED_APPS = [
     'customers',
     'inventory',
     'analytics.apps.AnalyticsConfig',
-    'sales',
+    'sales.apps.SalesConfig',
     'drf_yasg',
     'users',
     'corsheaders',

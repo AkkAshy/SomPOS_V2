@@ -12,6 +12,7 @@ from django.utils.translation import gettext_lazy as _
 from django.db.models import Sum
 from datetime import datetime, timedelta
 
+
 class AnalyticsPermission(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.groups.filter(name__in=['admin', 'manager']).exists()

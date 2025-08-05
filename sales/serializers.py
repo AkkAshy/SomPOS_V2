@@ -1,10 +1,15 @@
 #sales/serializers.py
 from rest_framework import serializers
-from .models import Transaction, TransactionItem
+from .models import Transaction, TransactionItem, TransactionHistory
 from inventory.models import Product
 from customers.models import Customer
 from django.utils.translation import gettext_lazy as _
 import logging
+import json
+from django.contrib.auth import get_user_model
+
+
+User = get_user_model()
 
 logger = logging.getLogger('sales')
 
@@ -103,3 +108,22 @@ class TransactionSerializer(serializers.ModelSerializer):
             f"Transaction created by {user.username}. ID: {transaction.id}, Total: {transaction.total_amount}"
         )
         return transaction
+    
+class TransactionHistorySerializer(serializers.ModelSerializer):
+    parsed_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TransactionHistory
+        fields = ['id', 'transaction', 'action', 'parsed_details', 'created_at']
+
+    def get_parsed_details(self, obj):
+        try:
+            return json.loads(obj.details)
+        except json.JSONDecodeError:
+            return {}
+        
+class CashierAggregateSerializer(serializers.Serializer):
+    cashier_id = serializers.IntegerField()
+    cashier_name = serializers.CharField()
+    total_quantity = serializers.IntegerField()
+    total_amount = serializers.DecimalField(max_digits=12, decimal_places=2)

@@ -9,6 +9,9 @@ from drf_yasg import openapi
 from .serializers import LoginSerializer, UserSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 import logging
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +145,7 @@ class RegisterView(APIView):
 
 class ProfileUpdateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+
     @swagger_auto_schema(
         operation_summary="Обновление профиля пользователя",
         request_body=UserSerializer,
@@ -193,3 +197,81 @@ class ProfileUpdateView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+
+class ProfileView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserSerializer
+
+    @swagger_auto_schema(
+        operation_summary="Получение профиля пользователя",
+        responses={200: UserSerializer, 404: "Пользователь не найден"},
+        tags=['Profile']
+    )
+
+    def get(self, request):
+        """
+        Получение профиля текущего пользователя
+
+        GET /api/users/profile/
+
+        Response:
+            200: {
+                "id": integer,
+                "username": "string",
+                "email": "string",
+                "first_name": "string",
+                "last_name": "string",
+                "groups": ["string"],
+                "employee": {
+                    "role": "string",
+                    "phone": "string",
+                    "photo": "string"
+                }
+            }
+            404: {
+                "error": "Пользователь не найден"
+            }
+        """
+        user = request.user
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
+
+
+
+class UserListView(APIView):
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    @swagger_auto_schema(
+        operation_summary="Список пользователей",
+        responses={200: UserSerializer(many=True)},
+        tags=['User List']
+    )
+    def get(self, request):
+        """
+        Получение списка всех пользователей
+
+        GET /api/users/
+
+        Response:
+            200: [
+                {
+                    "id": integer,
+                    "username": "string",
+                    "email": "string",
+                    "first_name": "string",
+                    "last_name": "string",
+                    "groups": ["string"],
+                    "employee": {
+                        "role": "string",
+                        "phone": "string",
+                        "photo": "string"
+                    }
+                }
+            ]
+        """
+        users = User.objects.all()
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+    

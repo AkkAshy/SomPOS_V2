@@ -12,6 +12,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 import logging
 from django.core.exceptions import ValidationError
+from rest_framework import pagination
 
 from .models import (
     Product, ProductCategory, Stock, ProductBatch, 
@@ -34,6 +35,7 @@ class ProductCategoryViewSet(ModelViewSet):
     """
     ViewSet для управления категориями товаров
     """
+    pagination_class = pagination.PageNumberPagination
     queryset = ProductCategory.objects.all()
     serializer_class = ProductCategorySerializer
     filter_backends = [SearchFilter, OrderingFilter]
