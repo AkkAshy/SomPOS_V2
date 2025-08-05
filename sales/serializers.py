@@ -74,9 +74,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
 
         if new_customer:
-            customer = Customer.objects.create(
-                full_name=new_customer['full_name'],
-                phone=new_customer['phone']
+            phone = new_customer['phone']
+            customer, created = Customer.objects.get_or_create(
+                phone=phone,
+                defaults={'full_name': new_customer['full_name']}
             )
         else:
             customer = Customer.objects.get(id=customer_id) if customer_id else None
