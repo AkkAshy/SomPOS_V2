@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 import barcode
 from barcode.writer import ImageWriter
+from decimal import Decimal, ROUND_HALF_UP
 import os
 from PIL import Image as PILImage, ImageDraw, ImageFont
 from django.conf import settings
@@ -23,6 +24,7 @@ from reportlab.lib.fonts import addMapping
 
 pdfmetrics.registerFont(TTFont('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
 addMapping('DejaVuSans', 0, 0, 'DejaVuSans')
+
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('inventory')
 
@@ -117,10 +119,32 @@ class AttributeValue(models.Model):
     def __str__(self):
         return f"{self.attribute_type.name}: {self.value} ({self.slug})"
 
+
+class UnitChoice(models.Model):
+    class UnitKind(models.TextChoices):
+        PRODUCT = 'PRODUCT', 'Товар'
+        MATERIAL = 'MATERIAL', 'Материал'
+        SERVICE = 'SERVICE', 'Услуга'
+
+    name = models.CharField(max_length=50, unique=True, verbose_name="Название единицы измерения")
+    slug = models.SlugField(max_length=50, unique=True, verbose_name="Слаг")
+    kind = models.CharField(max_length=20, choices=UnitKind.choices, default='MATERIAL', verbose_name="Тип (товар/материал/услуга)")
+    short_name = models.CharField(max_length=20, blank=True, verbose_name="Короткое наименование")
+    code = models.CharField(max_length=10, unique=True, verbose_name="Код")
+    decimal_places = models.PositiveIntegerField(default=2, verbose_name="Количество цифр после точки")
+
+    class Meta:
+        verbose_name = "Единица измерения"
+        verbose_name_plural = "Единицы измерения"
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.short_name or self.code})"
+
 class Product(models.Model):
-    UNIT_CHOICES = [
-        ('piece', 'Штука')
-    ]
+    # UNIT_CHOICES = [
+    #     ('piece', 'Штука')
+    # ]
     name = models.CharField(max_length=255, verbose_name="Название")
 
 
@@ -138,10 +162,10 @@ class Product(models.Model):
         related_name='products',
         verbose_name="Категория"
     )
-    unit = models.CharField(
-        max_length=50, 
-        choices=UNIT_CHOICES, 
-        default='piece',
+    unit = models.ForeignKey(
+        UnitChoice,
+        on_delete=models.PROTECT,
+        related_name='products',
         verbose_name="Единица измерения"
     )
     sale_price = models.DecimalField(
@@ -315,13 +339,6 @@ class Product(models.Model):
             if self.size:
                 info_lines.append(f"Размер: {self.size}")
 
-            # # Единица измерения
-            # info_lines.append(f"Единица: {self.get_unit_display()}")
-
-            # # Категория
-            # if self.category:
-            #     info_lines.append(f"Категория: {self.category.name}")
-            
             # Отображаем информацию
             for line in info_lines:
                 bbox = draw.textbbox((0, 0), line, font=info_font)
@@ -341,18 +358,7 @@ class Product(models.Model):
             label_img.paste(barcode_img, (x_barcode, y_offset))
             y_offset += barcode_height + 5
             
-            # 6. Добавляем номер штрих-кода под изображением
-            # barcode_text = str(self.barcode)
-            # bbox = draw.textbbox((0, 0), barcode_text, font=barcode_font)
-            # text_width = bbox[2] - bbox[0]
-            # x_center = (label_width - text_width) // 2
 
-            # draw.text((x_center, y_offset), barcode_text, fill="black", font=barcode_font)
-            # y_offset += barcode_font.getsize(barcode_text)[1]
-
-            # 7. Добавляем рамку
-            # draw.rectangle([0, 0, label_width-1, label_height-1], outline="black", width=2)
-            
             # 8. Сохраняем в bytes
             buffer = BytesIO()
             label_img.save(buffer, format="PNG", quality=95)
@@ -387,6 +393,7 @@ class Product(models.Model):
         # 2. Изменились важные для этикетки поля
         if is_new or self._has_label_fields_changed():
             self.generate_label()
+
 
 
 class ProductAttribute(models.Model):
@@ -432,9 +439,11 @@ class ProductBatch(models.Model):
         on_delete=models.CASCADE,
         related_name='batches'
     )
-    quantity = models.PositiveIntegerField(
+    quantity = models.DecimalField(
         validators=[MinValueValidator(1)],
-        verbose_name="Количество"
+        verbose_name="Количество",
+        max_digits=10,
+        decimal_places=4,
     )
     purchase_price = models.DecimalField(
         max_digits=10,
@@ -477,10 +486,12 @@ class Stock(models.Model):
         related_name='stock',
         verbose_name="Товар"
     )
-    quantity = models.IntegerField(
+    quantity = models.DecimalField(
         default=0,
         validators=[MinValueValidator(0)],
-        verbose_name="Количество"
+        verbose_name="Количество",
+        max_digits=10,
+        decimal_places=4
     )
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -489,21 +500,24 @@ class Stock(models.Model):
         verbose_name_plural = "Остатки на складе"
 
     def update_quantity(self):
-        """Обновляет общее количество товара на основе партий"""
         total = self.product.batches.aggregate(
             total=Sum('quantity')
         )['total'] or 0
-        self.quantity = total
+        self.quantity = total.quantize(
+            Decimal('0.1') ** self.product.unit.decimal_places, rounding=ROUND_HALF_UP
+        )
         self.save(update_fields=['quantity', 'updated_at'])
 
     def sell(self, quantity):
-        """Списывает товар по FIFO с обработкой ошибок"""
+        quantity = Decimal(str(quantity)).quantize(
+            Decimal('0.1') ** self.product.unit.decimal_places, rounding=ROUND_HALF_UP
+        )
         if quantity <= 0:
             raise ValueError("Количество должно быть положительным")
             
         if self.quantity < quantity:
             raise ValueError(
-                f"Недостаточно товара '{self.product.name}'. Доступно: {self.quantity}, запрошено: {quantity}"
+                f"Недостаточно товара '{self.product.name}'. Доступно: {self.quantity} {self.product.unit.short_name or self.product.unit.code}, запрошено: {quantity}"
             )
 
         remaining = quantity
@@ -512,16 +526,16 @@ class Stock(models.Model):
         for batch in batches:
             if remaining <= 0:
                 break
-                
             sell_amount = min(remaining, batch.quantity)
             batch.sell(sell_amount)
             remaining -= sell_amount
 
         self.update_quantity()
-        logger.info(f"Продано {quantity} {self.product.get_unit_display()} {self.product.name}")
+        logger.info(f"Продано {quantity} {self.product.unit.short_name or self.product.unit.code} {self.product.name}")
 
     def __str__(self):
-        return f"{self.product.name}: {self.quantity} {self.product.get_unit_display()}"
+        return f"{self.product.name}: {self.quantity} {self.product.unit.short_name or self.product.unit.code}"
+    
 
 @receiver(post_save, sender=Product)
 def create_product_stock(sender, instance, created, **kwargs):

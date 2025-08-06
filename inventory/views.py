@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 from django.db import transaction, models
-from django.db.models import Q, Sum, Prefetch
+from django.db.models import Q, Sum, F, Prefetch
 from django.utils.translation import gettext_lazy as _
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -13,22 +13,42 @@ from drf_yasg import openapi
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework import pagination
+from decimal import Decimal
 
 from .models import (
     Product, ProductCategory, Stock, ProductBatch, 
     AttributeType, AttributeValue, ProductAttribute,
-    SizeChart, SizeInfo
+    SizeChart, SizeInfo, UnitChoice
 )
 from .serializers import (
     ProductSerializer, ProductCategorySerializer, StockSerializer,
     ProductBatchSerializer, AttributeTypeSerializer, AttributeValueSerializer,
     ProductAttributeSerializer, SizeChartSerializer, SizeInfoSerializer,
-    ProductMultiSizeCreateSerializer
+    ProductMultiSizeCreateSerializer, UnitChoiceSerializer
 )
 
 from .filters import ProductFilter, ProductBatchFilter, StockFilter
 
 logger = logging.getLogger('inventory')
+
+
+class UnitChoiceViewSet(ModelViewSet):
+    """
+    ViewSet для управления единицами измерения
+    """
+    queryset = UnitChoice.objects.all()
+    serializer_class = UnitChoiceSerializer
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['name', 'short_name', 'code']
+    ordering_fields = ['name', 'kind']
+    ordering = ['kind', 'name']
+
+    @swagger_auto_schema(
+        operation_description="Получить все единицы измерения",
+        responses={200: UnitChoiceSerializer(many=True)}
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
 
 class ProductCategoryViewSet(ModelViewSet):
@@ -103,7 +123,40 @@ class AttributeValueViewSet(ModelViewSet):
     filterset_fields = ['attribute_type']
     search_fields = ['value']
 
+
+class SizeInfoViewSet(ModelViewSet):
+    """
+    ViewSet для управления размерной информацией
+    """
+    queryset = SizeInfo.objects.all()
+    serializer_class = SizeInfoSerializer
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['size']
+    ordering_fields = ['size']
+    ordering = ['size']
+
+    @swagger_auto_schema(
+        operation_description="Создать новую размерную информацию",
+        request_body=SizeInfoSerializer,
+        responses={
+            201: SizeInfoSerializer,
+            400: 'Ошибка валидации'
+        }
+    )
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            size = serializer.save()
+            logger.info(f"Создана размерная информация: {size.size}")
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class ProductViewSet(ModelViewSet):
+    """
+    ViewSet для управления товарами с поддержкой размеров и единиц измерения
+    """
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
@@ -114,41 +167,14 @@ class ProductViewSet(ModelViewSet):
 
     def get_queryset(self):
         return Product.objects.select_related(
-            'category', 'stock'
+            'category', 'stock', 'size', 'unit'
         ).prefetch_related(
-            # 'attributes',
-            # 'productattribute_set__attribute_value__attribute_type',
-            'size',
-            'batches'
+            Prefetch('batches', queryset=ProductBatch.objects.select_related('product'))
         )
 
     @swagger_auto_schema(
         operation_description="Создать товары для множественных размеров",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                'name': openapi.Schema(type=openapi.TYPE_STRING, description='Базовое название товара'),
-                'category': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID категории'),
-                'sale_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Цена продажи'),
-                'unit': openapi.Schema(type=openapi.TYPE_STRING, description='Единица измерения'),
-                'size_ids': openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    items=openapi.Schema(type=openapi.TYPE_INTEGER),
-                    description='Массив ID размеров'
-                ),
-                'batch_info': openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'quantity': openapi.Schema(type=openapi.TYPE_INTEGER),
-                        'purchase_price': openapi.Schema(type=openapi.TYPE_NUMBER),
-                        'supplier': openapi.Schema(type=openapi.TYPE_STRING),
-                        'expiration_date': openapi.Schema(type=openapi.TYPE_STRING, format='date', nullable=True)
-                    },
-                    required=[]
-                )
-            },
-            required=['name', 'category', 'sale_price', 'size_ids']
-        ),
+        request_body=ProductMultiSizeCreateSerializer,
         responses={
             201: openapi.Schema(
                 type=openapi.TYPE_OBJECT,
@@ -164,22 +190,6 @@ class ProductViewSet(ModelViewSet):
             400: 'Ошибка валидации'
         }
     )
-
-# {
-#     "name": "Футболка Армани",
-#     "category": 1,
-#     "sale_price": 150000.00,
-#     "unit": "piece",
-#     "size_ids": [1, 2, 3, 4],  // ID размеров S, M, L, XL
-#     "batch_info": {
-#         "quantity": 10,
-#         "purchase_price": 100000.00,
-#         "supplier": "Армани Official",
-#         "expiration_date": null
-#     }
-# }
-
-
     @action(detail=False, methods=['post'])
     def create_multi_size(self, request):
         """
@@ -214,7 +224,6 @@ class ProductViewSet(ModelViewSet):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# Также добавь этот вспомогательный endpoint для получения размеров
     @action(detail=False, methods=['get'])
     def available_sizes(self, request):
         """
@@ -228,6 +237,20 @@ class ProductViewSet(ModelViewSet):
             'count': sizes.count(),
             'message': _('Доступные размеры для товаров')
         })
+
+    @action(detail=False, methods=['get'])
+    def available_units(self, request):
+        """
+        Получить все доступные единицы измерения
+        """
+        units = UnitChoice.objects.all().order_by('kind', 'name')
+        serializer = UnitChoiceSerializer(units, many=True)
+        
+        return Response({
+            'units': serializer.data,
+            'count': units.count(),
+            'message': _('Доступные единицы измерения')
+        })
     
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -235,11 +258,10 @@ class ProductViewSet(ModelViewSet):
         Создание товара с логикой:
         1. Если штрих-код существует - добавляем партию
         2. Если нет - создаем новый товар
-        3. Обрабатываем size для связи с существующей размерной информацией
+        3. Обрабатываем связи с размером и единицами измерения
         """
         barcode = request.data.get('barcode')
         batch_info = request.data.pop('batch_info', {})
-        size_id = request.data.pop('size_id', None)  # Извлекаем size_id
         
         # Проверяем существование товара по штрих-коду
         if barcode:
@@ -261,26 +283,14 @@ class ProductViewSet(ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST
                         )
                 
-                # Обрабатываем size для существующего товара
-                if size_id:
-                    try:
-                        size_instance = SizeInfo.objects.get(id=size_id)
-                        existing_product.size = size_instance
-                        existing_product.save()
-                        logger.info(f"Добавлен размер {size_instance.size} для товара {existing_product.name}")
-                    except SizeInfo.DoesNotExist:
-                        return Response(
-                            {'size_error': _('Размерная информация не найдена')},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                
                 # Генерируем комбинированное изображение после обновления
-                existing_product.generate_label()
+                if hasattr(existing_product, 'generate_label'):
+                    existing_product.generate_label()
                 
                 serializer = self.get_serializer(existing_product)
                 return Response({
                     'product': serializer.data,
-                    'message': _('Партия и/или размер добавлены к существующему товару'),
+                    'message': _('Партия добавлена к существующему товару'),
                     'action': 'batch_added'
                 }, status=status.HTTP_200_OK)
                 
@@ -295,19 +305,6 @@ class ProductViewSet(ModelViewSet):
             except ValidationError as e:
                 return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Обрабатываем size
-            if size_id:
-                try:
-                    size_instance = SizeInfo.objects.get(id=size_id)
-                    product.size = size_instance
-                    product.save()
-                    logger.info(f"Добавлен размер {size_instance.size} для товара {product.name}")
-                except SizeInfo.DoesNotExist:
-                    return Response(
-                        {'size_error': _('Размерная информация не найдена')},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
             # Создаем партию если указана
             if batch_info:
                 batch_data = {
@@ -319,13 +316,12 @@ class ProductViewSet(ModelViewSet):
                     batch_serializer.save()
                     logger.info(f"Создана партия для нового товара {product.name}")
                 else:
-                    return Response(
-                        {'batch_errors': batch_serializer.errors},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                    # Не возвращаем ошибку, если товар уже создан
+                    logger.warning(f"Ошибка при создании партии: {batch_serializer.errors}")
 
             # Генерируем комбинированное изображение после создания
-            product.generate_label()
+            if hasattr(product, 'generate_label'):
+                product.generate_label()
             
             # Возвращаем обновленные данные
             updated_serializer = self.get_serializer(product)
@@ -340,46 +336,30 @@ class ProductViewSet(ModelViewSet):
     @transaction.atomic
     def update(self, request, *args, **kwargs):
         """
-        Обновление товара с атрибутами
+        Обновление товара с поддержкой размеров и единиц измерения
         """
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         
         if serializer.is_valid():
-            product = serializer.save()
-            
-            # Обновляем атрибуты если переданы
-            if 'attributes' in request.data:
-                self._handle_product_attributes(product, request.data['attributes'])
-            
-            updated_serializer = self.get_serializer(product)
-            return Response(updated_serializer.data)
+            try:
+                product = serializer.save()
+                
+                # Генерируем новое изображение если изменились данные
+                if hasattr(product, 'generate_label'):
+                    product.generate_label()
+                
+                updated_serializer = self.get_serializer(product)
+                return Response({
+                    'product': updated_serializer.data,
+                    'message': _('Товар успешно обновлен'),
+                    'action': 'product_updated'
+                })
+            except ValidationError as e:
+                return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def _handle_product_attributes(self, product, attributes_data):
-        """
-        Обработка атрибутов товара
-        """
-        if not attributes_data:
-            return
-            
-        # Удаляем старые атрибуты
-        ProductAttribute.objects.filter(product=product).delete()
-        
-        # Добавляем новые атрибуты
-        for attr_data in attributes_data:
-            attribute_value_id = attr_data.get('attribute_id')
-            if attribute_value_id:
-                try:
-                    attribute_value = AttributeValue.objects.get(id=attribute_value_id)
-                    ProductAttribute.objects.create(
-                        product=product,
-                        attribute_value=attribute_value
-                    )
-                except AttributeValue.DoesNotExist:
-                    logger.warning(f"Атрибут с ID {attribute_value_id} не найден")
 
     @swagger_auto_schema(
         operation_description="Сканировать штрих-код и получить информацию о товаре",
@@ -406,7 +386,10 @@ class ProductViewSet(ModelViewSet):
             )
 
         try:
-            product = Product.objects.select_related('category', 'stock').get(barcode=barcode)
+            product = Product.objects.select_related(
+                'category', 'stock', 'size', 'unit'
+            ).prefetch_related('batches').get(barcode=barcode)
+            
             serializer = self.get_serializer(product)
             return Response({
                 'found': True,
@@ -415,15 +398,17 @@ class ProductViewSet(ModelViewSet):
             })
         except Product.DoesNotExist:
             # Товар не найден, возвращаем форму для создания
-            attributes = AttributeType.objects.prefetch_related('values').all()
             categories = ProductCategory.objects.all()
+            sizes = SizeInfo.objects.all().order_by('size')
+            units = UnitChoice.objects.all().order_by('kind', 'name')
             
             return Response({
                 'found': False,
                 'barcode': barcode,
                 'form_data': {
                     'categories': ProductCategorySerializer(categories, many=True).data,
-                    'attributes': AttributeTypeSerializer(attributes, many=True).data
+                    'sizes': SizeInfoSerializer(sizes, many=True).data,
+                    'units': UnitChoiceSerializer(units, many=True).data,
                 },
                 'message': _('Товар не найден. Создайте новый товар.')
             })
@@ -434,26 +419,38 @@ class ProductViewSet(ModelViewSet):
         Продажа товара (списание со склада)
         """
         product = self.get_object()
-        quantity = request.data.get('quantity', 0)
+        quantity = request.data.get('quantity')
         
-        if quantity <= 0:
+        if not quantity or Decimal(str(quantity)) <= 0:
             return Response(
                 {'error': _('Количество должно быть больше нуля')},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         try:
+            quantity_decimal = Decimal(str(quantity)).quantize(
+                Decimal('0.1') ** product.unit.decimal_places
+            )
+            
             with transaction.atomic():
-                product.stock.sell(quantity)
+                stock, created = Stock.objects.get_or_create(product=product)
+                if stock.quantity < quantity_decimal:
+                    return Response(
+                        {'error': _('Недостаточно товара на складе')},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                stock.quantity -= quantity_decimal
+                stock.save()
             
             return Response({
                 'message': _('Товар успешно продан'),
-                'sold_quantity': quantity,
-                'remaining_stock': product.stock.quantity
+                'sold_quantity': str(quantity_decimal),
+                'remaining_stock': str(stock.quantity)
             })
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             return Response(
-                {'error': str(e)},
+                {'error': _('Некорректное количество')},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -462,20 +459,25 @@ class ProductViewSet(ModelViewSet):
         """
         Получить товары с низким остатком
         """
-        min_quantity = int(request.query_params.get('min_quantity', 10))
+        min_quantity = request.query_params.get('min_quantity', '10')
+        try:
+            min_quantity = Decimal(str(min_quantity))
+        except (ValueError, TypeError):
+            min_quantity = Decimal('10')
+            
         products = self.get_queryset().filter(stock__quantity__lte=min_quantity)
         
         serializer = self.get_serializer(products, many=True)
         return Response({
             'products': serializer.data,
             'count': products.count(),
-            'min_quantity': min_quantity
+            'min_quantity': str(min_quantity)
         })
 
 
 class ProductBatchViewSet(ModelViewSet):
     """
-    ViewSet для управления партиями товаров
+    ViewSet для управления партиями товаров с улучшенной валидацией количества
     """
     serializer_class = ProductBatchSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -486,7 +488,9 @@ class ProductBatchViewSet(ModelViewSet):
     ordering = ['expiration_date', 'created_at']
 
     def get_queryset(self):
-        return ProductBatch.objects.select_related('product').all()
+        return ProductBatch.objects.select_related(
+            'product', 'product__unit', 'product__size'
+        ).all()
 
     @swagger_auto_schema(
         operation_description="Создать новую партию товара",
@@ -514,7 +518,8 @@ class ProductBatchViewSet(ModelViewSet):
         
         batches = self.get_queryset().filter(
             expiration_date__lte=expiry_date,
-            expiration_date__isnull=False
+            expiration_date__isnull=False,
+            quantity__gt=0  # Только партии с остатками
         )
         
         serializer = self.get_serializer(batches, many=True)
@@ -524,10 +529,31 @@ class ProductBatchViewSet(ModelViewSet):
             'expiring_within_days': days
         })
 
+    @action(detail=False, methods=['get'])
+    def by_product(self, request):
+        """
+        Получить все партии конкретного товара
+        """
+        product_id = request.query_params.get('product_id')
+        if not product_id:
+            return Response(
+                {'error': _('Не указан ID товара')},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        batches = self.get_queryset().filter(product_id=product_id)
+        serializer = self.get_serializer(batches, many=True)
+        
+        return Response({
+            'batches': serializer.data,
+            'count': batches.count(),
+            'product_id': product_id
+        })
+
 
 class StockViewSet(ModelViewSet):
     """
-    ViewSet для управления остатками на складе
+    ViewSet для управления остатками на складе с поддержкой точности единиц измерения
     """
     serializer_class = StockSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -538,89 +564,146 @@ class StockViewSet(ModelViewSet):
     ordering = ['-updated_at']
 
     def get_queryset(self):
-        return Stock.objects.select_related('product', 'product__category').all()
+        return Stock.objects.select_related(
+            'product', 'product__category', 'product__unit'
+        ).all()
 
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """
         Сводка по остаткам на складе
         """
-        total_products = self.get_queryset().count()
-        total_quantity = self.get_queryset().aggregate(
-            total=Sum('quantity')
-        )['total'] or 0
+        queryset = self.get_queryset()
         
-        low_stock_count = self.get_queryset().filter(quantity__lte=10).count()
-        zero_stock_count = self.get_queryset().filter(quantity=0).count()
+        total_products = queryset.count()
+        total_quantity = queryset.aggregate(
+            total=Sum('quantity')
+        )['total'] or Decimal('0')
+        
+        low_stock_count = queryset.filter(quantity__lte=10).count()
+        zero_stock_count = queryset.filter(quantity=0).count()
+        
+        # Стоимость склада по закупочной цене
+        total_value = ProductBatch.objects.aggregate(
+            total=Sum(F('quantity') * F('purchase_price'))
+        )['total'] or Decimal('0')
         
         return Response({
             'total_products': total_products,
-            'total_quantity': total_quantity,
+            'total_quantity': str(total_quantity),
             'low_stock_products': low_stock_count,
-            'out_of_stock_products': zero_stock_count
+            'out_of_stock_products': zero_stock_count,
+            'total_stock_value': str(total_value)
         })
 
     @action(detail=True, methods=['post'])
     def adjust(self, request, pk=None):
         """
-        Корректировка остатков
+        Корректировка остатков с учетом единиц измерения
         """
         stock = self.get_object()
         new_quantity = request.data.get('quantity')
         reason = request.data.get('reason', 'Корректировка')
         
-        if new_quantity is None or new_quantity < 0:
+        if new_quantity is None:
+            return Response(
+                {'error': _('Не указано количество')},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_quantity_decimal = Decimal(str(new_quantity)).quantize(
+                Decimal('0.1') ** stock.product.unit.decimal_places
+            )
+            
+            if new_quantity_decimal < 0:
+                return Response(
+                    {'error': _('Количество не может быть отрицательным')},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except (ValueError, TypeError):
             return Response(
                 {'error': _('Некорректное количество')},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         old_quantity = stock.quantity
-        stock.quantity = new_quantity
+        stock.quantity = new_quantity_decimal
         stock.save()
         
         logger.info(
             f"Корректировка остатков {stock.product.name}: "
-            f"{old_quantity} -> {new_quantity}. Причина: {reason}"
+            f"{old_quantity} -> {new_quantity_decimal}. Причина: {reason}"
         )
         
         return Response({
             'message': _('Остатки скорректированы'),
-            'old_quantity': old_quantity,
-            'new_quantity': new_quantity,
+            'old_quantity': str(old_quantity),
+            'new_quantity': str(new_quantity_decimal),
             'reason': reason
         })
 
-class SizeInfoViewSet(ModelViewSet):
-    serializer_class = SizeInfoSerializer
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['product', 'size']
+    @action(detail=False, methods=['post'])
+    def bulk_adjust(self, request):
+        """
+        Массовая корректировка остатков
+        """
+        adjustments = request.data.get('adjustments', [])
+        if not adjustments:
+            return Response(
+                {'error': _('Не указаны корректировки')},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        results = []
+        errors = []
+        
+        with transaction.atomic():
+            for adjustment in adjustments:
+                try:
+                    product_id = adjustment.get('product_id')
+                    new_quantity = adjustment.get('quantity')
+                    reason = adjustment.get('reason', 'Массовая корректировка')
+                    
+                    stock = Stock.objects.select_related('product__unit').get(
+                        product_id=product_id
+                    )
+                    
+                    new_quantity_decimal = Decimal(str(new_quantity)).quantize(
+                        Decimal('0.1') ** stock.product.unit.decimal_places
+                    )
+                    
+                    old_quantity = stock.quantity
+                    stock.quantity = new_quantity_decimal
+                    stock.save()
+                    
+                    results.append({
+                        'product_id': product_id,
+                        'product_name': stock.product.name,
+                        'old_quantity': str(old_quantity),
+                        'new_quantity': str(new_quantity_decimal),
+                        'reason': reason
+                    })
+                    
+                except Exception as e:
+                    errors.append({
+                        'product_id': adjustment.get('product_id'),
+                        'error': str(e)
+                    })
+        
+        return Response({
+            'message': _('Массовая корректировка выполнена'),
+            'success_count': len(results),
+            'error_count': len(errors),
+            'results': results,
+            'errors': errors
+        })
 
-    def get_queryset(self):
-        return SizeInfo.objects.all()
-
-    @swagger_auto_schema(
-        operation_description="Создать новую размерную информацию",
-        request_body=SizeInfoSerializer,
-        responses={
-            201: SizeInfoSerializer,
-            400: 'Ошибка валидации'
-        }
-    )
-    @transaction.atomic
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            size = serializer.save()
-            logger.info(f"Создана размерная информация: {size.size}")
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # Дополнительные утилитные views
-
 class InventoryStatsView(generics.GenericAPIView):
     """
-    Общая статистика по складу
+    Общая статистика по складу с улучшенными метриками
     """
     
     @swagger_auto_schema(
@@ -631,7 +714,7 @@ class InventoryStatsView(generics.GenericAPIView):
                 properties={
                     'total_products': openapi.Schema(type=openapi.TYPE_INTEGER),
                     'total_categories': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'total_stock_value': openapi.Schema(type=openapi.TYPE_NUMBER),
+                    'total_stock_value': openapi.Schema(type=openapi.TYPE_STRING),
                     'low_stock_alerts': openapi.Schema(type=openapi.TYPE_INTEGER),
                 }
             )
@@ -641,20 +724,32 @@ class InventoryStatsView(generics.GenericAPIView):
         stats = {
             'total_products': Product.objects.count(),
             'total_categories': ProductCategory.objects.count(),
-            'total_attributes': AttributeType.objects.count(),
-            'total_stock_quantity': Stock.objects.aggregate(
+            'total_sizes': SizeInfo.objects.count(),
+            'total_units': UnitChoice.objects.count(),
+            'total_stock_quantity': str(Stock.objects.aggregate(
                 total=Sum('quantity')
-            )['total'] or 0,
+            )['total'] or Decimal('0')),
             'low_stock_alerts': Stock.objects.filter(quantity__lte=10).count(),
             'out_of_stock': Stock.objects.filter(quantity=0).count(),
             'total_batches': ProductBatch.objects.count(),
         }
         
         # Подсчет общей стоимости склада
-        from django.db.models import F
         total_value = ProductBatch.objects.aggregate(
             total=Sum(F('quantity') * F('purchase_price'))
-        )['total'] or 0
-        stats['total_stock_value'] = float(total_value)
+        )['total'] or Decimal('0')
+        stats['total_stock_value'] = str(total_value)
+        
+        # Статистика по категориям
+        category_stats = ProductCategory.objects.annotate(
+            product_count=models.Count('product')
+        ).values('name', 'product_count')
+        stats['categories_breakdown'] = list(category_stats)
+        
+        # Статистика по единицам измерения
+        unit_stats = UnitChoice.objects.annotate(
+            product_count=models.Count('product')
+        ).values('name', 'kind', 'product_count')
+        stats['units_breakdown'] = list(unit_stats)
         
         return Response(stats)
