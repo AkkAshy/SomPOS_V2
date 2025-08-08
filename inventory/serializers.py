@@ -7,14 +7,18 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from .models import (
     Product, ProductCategory, Stock, ProductBatch, AttributeType,
-    AttributeValue, ProductAttribute, SizeChart, SizeInfo, UnitChoice
+    AttributeValue, ProductAttribute, SizeChart, SizeInfo, Unit
 )
 
+
+
 class UnitChoiceSerializer(serializers.ModelSerializer):
+    get_name_display = serializers.CharField(read_only=True)
     class Meta:
-        model = UnitChoice
-        fields = ['id', 'name', 'short_name', 'code', 'kind', 'decimal_places']
-        read_only_fields = ['slug']
+        model = Unit
+        fields = ['id', 'name', 'get_name_display']
+    
+
 
 class ProductCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -78,6 +82,12 @@ class SizeInfoSerializer(serializers.ModelSerializer):
             }
         }
 
+from rest_framework import serializers
+from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
+from .models import ProductBatch, Product
+
+
 class ProductBatchSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     size = serializers.SerializerMethodField()
@@ -98,7 +108,7 @@ class ProductBatchSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'product_name', 'size']
 
     def get_size(self, obj):
-        if obj.product.size:
+        if obj.product and obj.product.size:
             return obj.product.size.size
         return None
 
@@ -108,15 +118,7 @@ class ProductBatchSerializer(serializers.ModelSerializer):
                 _("Количество должно быть больше нуля"),
                 code='invalid_quantity'
             )
-        product_id = self.initial_data.get('product') or (self.instance.product.id if self.instance else None)
-        if product_id:
-            product = Product.objects.get(id=product_id)
-            quantity_str = str(Decimal(value).quantize(Decimal('0.1') ** product.unit.decimal_places))
-            if len(quantity_str.split('.')[-1]) > product.unit.decimal_places:
-                raise serializers.ValidationError(
-                    f"Количество должно иметь не более {product.unit.decimal_places} знаков после запятой."
-                )
-        return value.quantize(Decimal('0.1') ** product.unit.decimal_places, rounding=ROUND_HALF_UP)
+        return value
 
     def validate(self, data):
         expiration_date = data.get('expiration_date')
@@ -126,6 +128,7 @@ class ProductBatchSerializer(serializers.ModelSerializer):
                 code='expired_product'
             )
         return data
+
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -147,7 +150,7 @@ class ProductSerializer(serializers.ModelSerializer):
     unit = UnitChoiceSerializer(read_only=True)
     unit_id = serializers.PrimaryKeyRelatedField(
         source='unit',
-        queryset=UnitChoice.objects.all(),
+        queryset=Unit.objects.all(),
         write_only=True,
         required=True,
         help_text=_('ID единицы измерения')
@@ -268,7 +271,7 @@ class ProductMultiSizeCreateSerializer(serializers.Serializer):
     sale_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
     unit_id = serializers.PrimaryKeyRelatedField(
         source='unit',
-        queryset=UnitChoice.objects.all(),
+        queryset=Unit.objects.all(),
         write_only=True,
         required=True,
         help_text=_('ID единицы измерения')
@@ -290,7 +293,7 @@ class ProductMultiSizeCreateSerializer(serializers.Serializer):
         unit_id = self.initial_data.get('unit_id')
         if not unit_id:
             raise serializers.ValidationError({"unit_id": "Не указана единица измерения."})
-        unit = UnitChoice.objects.get(id=unit_id)
+        unit = Unit.objects.get(id=unit_id)
 
         for item in value:
             size_id = item.get('size_id')

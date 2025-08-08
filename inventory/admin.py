@@ -1,6 +1,6 @@
 # inventory/admin.py
 from django.contrib import admin
-from .models import ProductCategory, Product, Stock, ProductBatch
+from .models import ProductCategory, Product, Stock, ProductBatch, Unit
 import logging
 
 logger = logging.getLogger('inventory')
@@ -31,3 +31,15 @@ class StockAdmin(admin.ModelAdmin):
 class ProductBatchAdmin(admin.ModelAdmin):
     list_display = ['product', 'quantity', 'expiration_date', 'created_at']
     list_filter = ['expiration_date']
+
+
+@admin.register(Unit)
+class UnitAdmin(admin.ModelAdmin):
+    list_display = ['name', ]
+    search_fields = ['name', ]
+    def save_model(self, request, obj, form, change):
+        logger.info(f"[SomPOS] Admin {request.user} {'updated' if change else 'created'} unit {obj.name}")
+        super().save_model(request, obj, form, change)
+    def delete_model(self, request, obj):
+        logger.info(f"[SomPOS] Admin {request.user} deleted unit {obj.name}")
+        super().delete_model(request, obj)

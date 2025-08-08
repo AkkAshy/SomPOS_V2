@@ -120,26 +120,28 @@ class AttributeValue(models.Model):
         return f"{self.attribute_type.name}: {self.value} ({self.slug})"
 
 
-class UnitChoice(models.Model):
-    class UnitKind(models.TextChoices):
-        PRODUCT = 'PRODUCT', 'Товар'
-        MATERIAL = 'MATERIAL', 'Материал'
-        SERVICE = 'SERVICE', 'Услуга'
+class Unit(models.Model):
+    class UnitChoices(models.TextChoices):
+        METER = "m", "Метр"
+        CENTIMETER = "cm", "Сантиметр"
+        MILLIMETER = "mm", "Миллиметр"
+        INCH = "inch", "Дюйм"
+        KILOGRAM = "kg", "Килограмм"
+        GRAM = "g", "Грамм"
+        LITER = "l", "Литр"
+        PIECE = "pcs", "Штука"
+        PACKAGE = "pack", "Упаковка"
 
-    name = models.CharField(max_length=50, unique=True, verbose_name="Название единицы измерения")
-    slug = models.SlugField(max_length=50, unique=True, verbose_name="Слаг")
-    kind = models.CharField(max_length=20, choices=UnitKind.choices, default='MATERIAL', verbose_name="Тип (товар/материал/услуга)")
-    short_name = models.CharField(max_length=20, blank=True, verbose_name="Короткое наименование")
-    code = models.CharField(max_length=10, unique=True, verbose_name="Код")
-    decimal_places = models.PositiveIntegerField(default=2, verbose_name="Количество цифр после точки")
-
-    class Meta:
-        verbose_name = "Единица измерения"
-        verbose_name_plural = "Единицы измерения"
-        ordering = ['name']
+    name = models.CharField(
+        max_length=10,
+        choices=UnitChoices.choices,
+        unique=True
+    )
 
     def __str__(self):
-        return f"{self.name} ({self.short_name or self.code})"
+        return self.get_name_display()
+
+
 
 class Product(models.Model):
     # UNIT_CHOICES = [
@@ -163,7 +165,7 @@ class Product(models.Model):
         verbose_name="Категория"
     )
     unit = models.ForeignKey(
-        UnitChoice,
+        Unit,
         on_delete=models.PROTECT,
         related_name='products',
         verbose_name="Единица измерения"
@@ -375,23 +377,33 @@ class Product(models.Model):
         return str((10 - (total % 10)) % 10)
 
     def save(self, *args, **kwargs):
-        """Переопределяем save для автоматической генерации этикетки"""
-        is_new = self._state.adding  # Проверяем, новый ли это объект
-        
-        # Получаем список полей, которые нужно обновить
+        is_new = self._state.adding
         update_fields = kwargs.get('update_fields')
-        
-        # Если обновляется только image_label, не генерируем этикетку заново
+        if not self.barcode:
+            if is_new:
+                # Генерируем уникальный штрих-код только при создании
+                self.barcode = self.generate_unique_barcode()
+            else:
+                # Если штрих-код не указан, не сохраняем его
+                kwargs.pop('update_fields', None)
+                kwargs['force_insert'] = False
+
         if update_fields and update_fields == ['image_label']:
             super().save(*args, **kwargs)
             return
-        
-        super().save(*args, **kwargs)  # Сначала сохраняем объект
-        
-        # Генерируем этикетку если:
-        # 1. Это новый товар ИЛИ
-        # 2. Изменились важные для этикетки поля
-        if is_new or self._has_label_fields_changed():
+
+        if not is_new and self.pk:
+            old = Product.objects.get(pk=self.pk)
+            label_changed = any(
+                getattr(old, f) != getattr(self, f)
+                for f in ['name', 'sale_price', 'barcode', 'size']
+            )
+        else:
+            label_changed = True
+
+        super().save(*args, **kwargs)
+
+        if label_changed:
             self.generate_label()
 
 
@@ -502,22 +514,19 @@ class Stock(models.Model):
     def update_quantity(self):
         total = self.product.batches.aggregate(
             total=Sum('quantity')
-        )['total'] or 0
-        self.quantity = total.quantize(
-            Decimal('0.1') ** self.product.unit.decimal_places, rounding=ROUND_HALF_UP
-        )
+        )['total'] or Decimal('0')
+        self.quantity = total.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
         self.save(update_fields=['quantity', 'updated_at'])
 
     def sell(self, quantity):
-        quantity = Decimal(str(quantity)).quantize(
-            Decimal('0.1') ** self.product.unit.decimal_places, rounding=ROUND_HALF_UP
-        )
+        quantity = Decimal(str(quantity)).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
         if quantity <= 0:
             raise ValueError("Количество должно быть положительным")
             
         if self.quantity < quantity:
             raise ValueError(
-                f"Недостаточно товара '{self.product.name}'. Доступно: {self.quantity} {self.product.unit.short_name or self.product.unit.code}, запрошено: {quantity}"
+                f"Недостаточно товара '{self.product.name}'. "
+                f"Доступно: {self.quantity} {self.product.unit.name}, запрошено: {quantity}"
             )
 
         remaining = quantity
@@ -531,10 +540,10 @@ class Stock(models.Model):
             remaining -= sell_amount
 
         self.update_quantity()
-        logger.info(f"Продано {quantity} {self.product.unit.short_name or self.product.unit.code} {self.product.name}")
+        logger.info(f"Продано {quantity} {self.product.unit.name} {self.product.name}")
 
     def __str__(self):
-        return f"{self.product.name}: {self.quantity} {self.product.unit.short_name or self.product.unit.code}"
+        return f"{self.product.name}: {self.quantity} {self.product.unit.name}"
     
 
 @receiver(post_save, sender=Product)

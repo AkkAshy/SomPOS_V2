@@ -11,11 +11,6 @@ from .serializers import SalesSummarySerializer, ProductAnalyticsSerializer, Cus
 from django.utils.translation import gettext_lazy as _
 from django.db.models import Sum
 from datetime import datetime, timedelta
-from rest_framework.views import APIView
-
-from sales.serializers import TransactionHistorySerializer
-from sales.models import Transaction, TransactionHistory
-from .funcs import get_date_range
 
 
 class AnalyticsPermission(permissions.BasePermission):
@@ -146,34 +141,5 @@ class CustomerAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response({
             'top_customers': top_customers,
-            'limit': limit  
+            'limit': limit
         })
-
-
-class TransactionsHistoryByDayView(APIView):
-    def get(self, request):
-        date_from = request.GET.get("date_from")
-        date_to = request.GET.get("date_to")
-
-        if not date_from or not date_to:
-            return Response({"error": "Uncorrect datas"})
-        
-        try:
-            dates = get_date_range(date_from, date_to)
-            trasnactions_list = []
-            for date in dates:
-                trasnactions = TransactionHistory.objects.filter(created_at__date=date).all()
-                trasnactions = TransactionHistorySerializer(trasnactions, many=True).data
-                if trasnactions:
-                    amounts = 0
-                    for transaction in trasnactions:
-                        try:
-                            amount = float(transaction["parsed_details"]["total_amount"])
-                        except:
-                            amount = 0
-                        amounts += amount
-                    trasnactions_list.append({date: amounts})
-
-            return Response(trasnactions_list)
-        except Exception as e:
-            return Response({"error": str(e)})

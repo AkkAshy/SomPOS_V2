@@ -2,7 +2,7 @@
 from rest_framework import status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from django.db import transaction, models
 from django.db.models import Q, Sum, F, Prefetch
 from django.utils.translation import gettext_lazy as _
@@ -18,7 +18,7 @@ from decimal import Decimal
 from .models import (
     Product, ProductCategory, Stock, ProductBatch, 
     AttributeType, AttributeValue, ProductAttribute,
-    SizeChart, SizeInfo, UnitChoice
+    SizeChart, SizeInfo, Unit
 )
 from .serializers import (
     ProductSerializer, ProductCategorySerializer, StockSerializer,
@@ -31,24 +31,9 @@ from .filters import ProductFilter, ProductBatchFilter, StockFilter
 
 logger = logging.getLogger('inventory')
 
-
-class UnitChoiceViewSet(ModelViewSet):
-    """
-    ViewSet для управления единицами измерения
-    """
-    queryset = UnitChoice.objects.all()
+class UnitViewSet(ModelViewSet):
+    queryset = Unit.objects.all()
     serializer_class = UnitChoiceSerializer
-    filter_backends = [SearchFilter, OrderingFilter]
-    search_fields = ['name', 'short_name', 'code']
-    ordering_fields = ['name', 'kind']
-    ordering = ['kind', 'name']
-
-    @swagger_auto_schema(
-        operation_description="Получить все единицы измерения",
-        responses={200: UnitChoiceSerializer(many=True)}
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
 
 
 class ProductCategoryViewSet(ModelViewSet):
@@ -243,7 +228,7 @@ class ProductViewSet(ModelViewSet):
         """
         Получить все доступные единицы измерения
         """
-        units = UnitChoice.objects.all().order_by('kind', 'name')
+        units = Unit.objects.all().order_by('kind', 'name')
         serializer = UnitChoiceSerializer(units, many=True)
         
         return Response({
@@ -400,8 +385,8 @@ class ProductViewSet(ModelViewSet):
             # Товар не найден, возвращаем форму для создания
             categories = ProductCategory.objects.all()
             sizes = SizeInfo.objects.all().order_by('size')
-            units = UnitChoice.objects.all().order_by('kind', 'name')
-            
+            units = Unit.objects.all().order_by('kind', 'name')
+
             return Response({
                 'found': False,
                 'barcode': barcode,
@@ -725,7 +710,7 @@ class InventoryStatsView(generics.GenericAPIView):
             'total_products': Product.objects.count(),
             'total_categories': ProductCategory.objects.count(),
             'total_sizes': SizeInfo.objects.count(),
-            'total_units': UnitChoice.objects.count(),
+            'total_units': Unit.objects.count(),
             'total_stock_quantity': str(Stock.objects.aggregate(
                 total=Sum('quantity')
             )['total'] or Decimal('0')),
@@ -747,9 +732,11 @@ class InventoryStatsView(generics.GenericAPIView):
         stats['categories_breakdown'] = list(category_stats)
         
         # Статистика по единицам измерения
-        unit_stats = UnitChoice.objects.annotate(
+        unit_stats = Unit.objects.annotate(
             product_count=models.Count('product')
         ).values('name', 'kind', 'product_count')
         stats['units_breakdown'] = list(unit_stats)
         
         return Response(stats)
+    
+
