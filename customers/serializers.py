@@ -10,10 +10,13 @@ class CustomerSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField(
         help_text="Полное имя клиента или 'Анонимный покупатель' если имя не указано"
     )
-    
+    last_purchase_date = serializers.SerializerMethodField()
+    purchase_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Customer
-        fields = ['id', 'full_name', 'phone', 'debt', 'created_at']
+        fields = ['id', 'full_name', 'phone', 'debt', 'created_at', 'last_purchase_date', 'total_spent',
+            'purchase_count']
         read_only_fields = ['id', 'created_at']
         extra_kwargs = {
             'phone': {
@@ -59,24 +62,29 @@ class CustomerSerializer(serializers.ModelSerializer):
     @swagger_serializer_method(serializer_or_field=serializers.CharField(help_text="Форматированное полное имя клиента"))
     def get_full_name(self, obj):
         return obj.full_name or _("Анонимный покупатель")
-    def get_full_name(self, obj):
-        return obj.full_name or _("Анонимный покупатель")
 
     def validate_phone(self, value):
         value = value.strip()
         if not value:
             raise serializers.ValidationError(_("Номер телефона не может быть пустым"))
-        
+
         # Простая валидация формата номера
         if not value.startswith('+'):
             raise serializers.ValidationError(_("Номер должен начинаться с '+'"))
-            
+
         if len(value) < 10:
             raise serializers.ValidationError(_("Слишком короткий номер телефона"))
-            
+
         return value
 
     def validate_debt(self, value):
         if value < 0:
             raise serializers.ValidationError(_("Задолженность не может быть отрицательной"))
         return round(value, 2)
+
+    def get_last_purchase_date(self, obj):
+        date = getattr(obj, 'annotated_last_purchase_date', None)
+        return date.isoformat() if date else None
+
+    def get_purchase_count(self, obj):
+        return obj.purchase_count

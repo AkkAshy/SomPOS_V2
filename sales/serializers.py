@@ -65,6 +65,11 @@ class TransactionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"error": _("Для оплаты в долг требуется customer_id или new_customer")}
             )
+        
+        if not hasattr(product, 'stock') or product.stock.quantity < quantity_in_base:
+            raise serializers.ValidationError(
+                {"items": _(f"Недостаточно товара {product.name} на складе")}
+            )
 
         if new_customer:
             if not new_customer.get('full_name') or not new_customer.get('phone'):
@@ -105,7 +110,7 @@ class TransactionSerializer(serializers.ModelSerializer):
 
         if new_customer:
             phone = new_customer['phone']
-            customer, _ = Customer.objects.get_or_create(
+            customer, created = Customer.objects.get_or_create(
                 phone=phone,
                 defaults={'full_name': new_customer['full_name']}
             )
@@ -124,6 +129,10 @@ class TransactionSerializer(serializers.ModelSerializer):
             sell_unit = item_data.get('sell_unit', product.unit.name)
 
             rate = get_conversion_rate(sell_unit, product.unit.name)
+            if rate is None:
+                raise serializers.ValidationError(
+                    {"items": _(f"Нет конверсии из {sell_unit} в {product.unit.name}")}
+                )
             quantity_in_base = quantity * rate
 
             TransactionItem.objects.create(
