@@ -98,6 +98,12 @@ class TransactionItem(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(0)]
     )
+    sell_unit = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        help_text="Единица измерения для продажи (если отличается от базовой единицы товара)"
+    )
 
     class Meta:
         verbose_name = "Элемент продажи"

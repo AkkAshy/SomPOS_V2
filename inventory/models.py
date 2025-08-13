@@ -24,7 +24,6 @@ from reportlab.lib.fonts import addMapping
 
 pdfmetrics.registerFont(TTFont('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
 addMapping('DejaVuSans', 0, 0, 'DejaVuSans')
-
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('inventory')
 
@@ -38,30 +37,27 @@ class SizeInfo(models.Model):
         ('XXL', 'XXL'),
     ]
 
-
-    
     size = models.CharField(max_length=50, verbose_name="Размер")
 
     chest = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1)],
-        null=True, 
+        null=True,
         blank=True,
         verbose_name="Обхват груди"
     )
     waist = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1)],
-        null=True, 
+        null=True,
         blank=True,
         verbose_name="Обхват талии"
     )
     length = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1)],
-        null=True, 
+        null=True,
         blank=True,
         verbose_name="Длина"
     )
 
-    
     class Meta:
         verbose_name = "Размерная информация"
         verbose_name_plural = "Размерные информации"
@@ -80,7 +76,7 @@ class ProductCategory(models.Model):
         verbose_name_plural = "Категории товаров"
         ordering = ['name']
 
-    def __str__(self): 
+    def __str__(self):
         return self.name
 
 
@@ -96,7 +92,7 @@ class AttributeType(models.Model):
 
     def __str__(self):
         return self.name
-    
+
 
 class AttributeValue(models.Model):
     attribute_type = models.ForeignKey(
@@ -104,7 +100,6 @@ class AttributeValue(models.Model):
         on_delete=models.CASCADE,
         related_name='values',
         verbose_name="Тип атрибута"
-
     )
     value = models.CharField(max_length=225, verbose_name="Значение")
     slug = models.SlugField(max_length=225, unique=True, verbose_name="Слаг")
@@ -121,6 +116,7 @@ class AttributeValue(models.Model):
 
 
 class Unit(models.Model):
+    """Модель единиц измерения - из локальной версии"""
     class UnitChoices(models.TextChoices):
         METER = "m", "Метр"
         CENTIMETER = "cm", "Сантиметр"
@@ -137,29 +133,39 @@ class Unit(models.Model):
         choices=UnitChoices.choices,
         unique=True
     )
+    
+    # Добавляем поле для точности
+    decimal_places = models.PositiveIntegerField(
+        default=2,
+        help_text="Количество знаков после запятой для этой единицы измерения"
+    )
 
     def __str__(self):
         return self.get_name_display()
 
+    @property 
+    def short_name(self):
+        """Возвращает короткое название единицы"""
+        return self.name
+
+    class Meta:
+        verbose_name = "Единица измерения"
+        verbose_name_plural = "Единицы измерения"
 
 
 class Product(models.Model):
-    # UNIT_CHOICES = [
-    #     ('piece', 'Штука')
-    # ]
     name = models.CharField(max_length=255, verbose_name="Название")
 
-
     barcode = models.CharField(
-        max_length=100, 
-        unique=True, 
-        null=True, 
+        max_length=100,
+        unique=True,
+        null=True,
         blank=True,
         db_index=True,
         verbose_name="Штрих-код"
     )
     category = models.ForeignKey(
-        ProductCategory, 
+        ProductCategory,
         on_delete=models.PROTECT,
         related_name='products',
         verbose_name="Категория"
@@ -171,9 +177,9 @@ class Product(models.Model):
         verbose_name="Единица измерения"
     )
     sale_price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        default=0.00, 
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
         validators=[MinValueValidator(0)],
         verbose_name="Цена продажи"
     )
@@ -194,6 +200,14 @@ class Product(models.Model):
         verbose_name="Изображение этикетки"
     )
 
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='products_created',
+        verbose_name="Создан пользователем"
+    )
 
     @classmethod
     def generate_unique_barcode(cls):
@@ -203,22 +217,22 @@ class Product(models.Model):
         import random
         import time
         from django.utils import timezone
-        
+
         max_attempts = 100
         attempts = 0
-        
+
         while attempts < max_attempts:
             # Вариант 1: На основе времени и случайных чисел
             timestamp = str(int(timezone.now().timestamp()))[-6:]  # 6 последних цифр времени
             random_part = str(random.randint(100000, 999999))  # 6 случайных цифр
             barcode = timestamp + random_part
-            
+
             # Проверяем уникальность
             if not cls.objects.filter(barcode=barcode).exists():
                 return barcode
-            
+
             attempts += 1
-        
+
         # Если не удалось сгенерировать за 100 попыток, используем UUID
         import uuid
         return str(uuid.uuid4().int)[:12]  # Первые 12 цифр из UUID
@@ -230,10 +244,13 @@ class Product(models.Model):
             models.Index(fields=['name', 'barcode']),
         ]
 
-    def __str__(self): 
-        return f"{self.name} ({self.get_unit_display()})"
+    def __str__(self):
+        return f"{self.name} ({self.unit})"
 
-    
+    def get_unit_display(self):
+        """Для совместимости с серверной версией"""
+        return self.unit.get_name_display()
+
     def clean(self):
         """Валидация перед сохранением"""
         super().clean()
@@ -252,20 +269,20 @@ class Product(models.Model):
         try:
             # 1. Генерируем штрих-код в памяти
             barcode_image = self._generate_barcode_image()
-            
+
             # 2. Создаем полную этикетку
             label_bytes = self._create_label_image(barcode_image)
-            
-            # 3. Сохраняем этикетку (ИСПРАВЛЕНО: используем правильное имя поля)
+
+            # 3. Сохраняем этикетку
             label_filename = f'product_labels/product_{self.id}_label.png'
             self.image_label.save(label_filename, ContentFile(label_bytes), save=False)
-            
+
             # Сохраняем только поле image_label, чтобы не вызвать рекурсию
             super().save(update_fields=['image_label'])
-            
+
             logger.info(f"Этикетка успешно создана для товара {self.id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Ошибка генерации этикетки: {str(e)}", exc_info=True)
             return False
@@ -274,7 +291,7 @@ class Product(models.Model):
         """Генерирует изображение штрих-кода в памяти"""
         barcode_str = str(self.barcode).strip().zfill(12)[:12]
         full_ean = barcode_str + self._calculate_ean13_checksum(barcode_str)
-        
+
         try:
             # Создаем штрих-код в памяти
             ean = barcode.get_barcode_class('ean13')
@@ -282,11 +299,11 @@ class Product(models.Model):
             ean(full_ean, writer=ImageWriter()).write(barcode_buffer)
             barcode_buffer.seek(0)
             barcode_img = PILImage.open(barcode_buffer)
-            
-            # Масштабируем штрих-код до нужного размера
+
+            # Масштабируем штрих-код до нужного размера (из локальной версии)
             barcode_img = barcode_img.resize((120, 80), PILImage.Resampling.LANCZOS)
             return barcode_img
-            
+
         except Exception as e:
             logger.error(f"Ошибка генерации штрих-кода: {str(e)}")
             raise
@@ -294,16 +311,16 @@ class Product(models.Model):
     def _create_label_image(self, barcode_img):
         """Создает этикетку в памяти с улучшенной компоновкой"""
         try:
-            # 1. Создаем холст (увеличиваем высоту для всех элементов)
+            # 1. Создаем холст (больший размер из локальной версии)
             label_width, label_height = 500, 400
             label_img = PILImage.new("RGB", (label_width, label_height), "white")
             draw = ImageDraw.Draw(label_img)
-            
+
             # 2. Настраиваем шрифты
             try:
                 # Пробуем разные варианты шрифтов
                 title_font = ImageFont.truetype("arial.ttf", 18)
-                info_font = ImageFont.truetype("arial.ttf", 25)
+                info_font = ImageFont.truetype("arial.ttf", 14)
                 barcode_font = ImageFont.truetype("arial.ttf", 12)
             except (OSError, IOError):
                 try:
@@ -316,30 +333,36 @@ class Product(models.Model):
                     title_font = ImageFont.load_default()
                     info_font = ImageFont.load_default()
                     barcode_font = ImageFont.load_default()
-            
+
             # 3. Добавляем название товара (с переносом строк если длинное)
             y_offset = 10
             name_text = self.name[:50] + '...' if len(self.name) > 50 else self.name
-            
+
             # Центрируем название
             bbox = draw.textbbox((0, 0), name_text, font=title_font)
             text_width = bbox[2] - bbox[0]
             x_center = (label_width - text_width) // 2
-            
+
             draw.text((x_center, y_offset), name_text, fill="black", font=title_font)
             y_offset += 35
-            
+
             # 4. Добавляем информацию о товаре
             info_lines = []
-            
+
             # Цена
             if self.sale_price:
                 info_lines.append(f"Цена: {self.sale_price:.2f} UZS")
 
-            
             # Размер
             if self.size:
                 info_lines.append(f"Размер: {self.size}")
+
+            # Единица измерения
+            info_lines.append(f"Единица: {self.get_unit_display()}")
+
+            # Категория
+            if self.category:
+                info_lines.append(f"Категория: {self.category.name}")
 
             # Отображаем информацию
             for line in info_lines:
@@ -349,23 +372,35 @@ class Product(models.Model):
                 draw.text((x_center, y_offset), line, fill="black", font=info_font)
                 y_offset += 25
 
-            
-            
             # 5. Добавляем штрих-код
             y_offset += 10  # Небольшой отступ
             barcode_width, barcode_height = barcode_img.size
             x_barcode = (label_width - barcode_width) // 2
-            
+
             # Вставляем штрих-код
             label_img.paste(barcode_img, (x_barcode, y_offset))
             y_offset += barcode_height + 5
+
+            # 6. Добавляем номер штрих-кода под изображением
+            barcode_text = str(self.barcode)
+            bbox = draw.textbbox((0, 0), barcode_text, font=barcode_font)
+            text_width = bbox[2] - bbox[0]
+            x_center = (label_width - text_width) // 2
+
+            draw.text((x_center, y_offset), barcode_text, fill="black", font=barcode_font)
             
+            # Исправляем устаревший getsize на textbbox
+            bbox = draw.textbbox((0, 0), barcode_text, font=barcode_font)
+            y_offset += bbox[3] - bbox[1]
+
+            # 7. Добавляем рамку
+            draw.rectangle([0, 0, label_width-1, label_height-1], outline="black", width=2)
 
             # 8. Сохраняем в bytes
             buffer = BytesIO()
             label_img.save(buffer, format="PNG", quality=95)
             return buffer.getvalue()
-            
+
         except Exception as e:
             logger.error(f"Ошибка создания этикетки: {str(e)}", exc_info=True)
             raise
@@ -377,35 +412,42 @@ class Product(models.Model):
         return str((10 - (total % 10)) % 10)
 
     def save(self, *args, **kwargs):
+        """Переопределяем save для автоматической генерации этикетки"""
         is_new = self._state.adding
         update_fields = kwargs.get('update_fields')
-        if not self.barcode:
-            if is_new:
-                # Генерируем уникальный штрих-код только при создании
-                self.barcode = self.generate_unique_barcode()
-            else:
-                # Если штрих-код не указан, не сохраняем его
-                kwargs.pop('update_fields', None)
-                kwargs['force_insert'] = False
 
+        # Генерируем штрих-код только при создании если он не указан
+        if not self.barcode and is_new:
+            self.barcode = self.generate_unique_barcode()
+
+        # Если обновляем только image_label — не генерируем заново
         if update_fields and update_fields == ['image_label']:
             super().save(*args, **kwargs)
             return
 
-        if not is_new and self.pk:
-            old = Product.objects.get(pk=self.pk)
-            label_changed = any(
-                getattr(old, f) != getattr(self, f)
-                for f in ['name', 'sale_price', 'barcode', 'size']
-            )
-        else:
-            label_changed = True
+        # Поля, которые влияют на этикетку
+        label_relevant_fields = ['name', 'barcode', 'sale_price', 'size', 'unit', 'category']
 
+        # Проверяем, изменились ли они (только если объект уже существовал)
+        if not is_new:
+            current = Product.objects.filter(pk=self.pk).values(*label_relevant_fields).first()
+            if current:
+                fields_changed = any(
+                    str(getattr(self, f)) != str(current[f])
+                    for f in label_relevant_fields
+                    if getattr(self, f) is not None or current[f] is not None
+                )
+            else:
+                fields_changed = False
+        else:
+            fields_changed = True  # новый товар — точно нужна этикетка
+
+        # Сохраняем сначала, чтобы был self.id (для генерации label_filename)
         super().save(*args, **kwargs)
 
-        if label_changed:
+        # Генерируем этикетку, если это новый товар или поля изменились
+        if fields_changed:
             self.generate_label()
-
 
 
 class ProductAttribute(models.Model):
@@ -430,6 +472,7 @@ class ProductAttribute(models.Model):
     def __str__(self):
         return f"{self.product.name} - {self.attribute_value.value}"
 
+
 class SizeChart(models.Model):
     name = models.CharField(max_length=100, unique=True, verbose_name="Название")
     description = models.TextField(blank=True, null=True, verbose_name="Описание")
@@ -442,7 +485,6 @@ class SizeChart(models.Model):
 
     def __str__(self):
         return self.name
-    
 
 
 class ProductBatch(models.Model):
@@ -452,7 +494,7 @@ class ProductBatch(models.Model):
         related_name='batches'
     )
     quantity = models.DecimalField(
-        validators=[MinValueValidator(1)],
+        validators=[MinValueValidator(Decimal('0.0001'))],
         verbose_name="Количество",
         max_digits=10,
         decimal_places=4,
@@ -464,7 +506,14 @@ class ProductBatch(models.Model):
         blank=True,
         verbose_name="Цена закупки",
     )
-    supplier = models.CharField(max_length=255, blank=True, null=True,  verbose_name="Поставщик")
+    size = models.ForeignKey(
+        SizeInfo,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        verbose_name="Размер"
+    )
+    supplier = models.CharField(max_length=255, blank=True, null=True, verbose_name="Поставщик")
     expiration_date = models.DateField(null=True, blank=True, verbose_name="Дата истечения")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -474,6 +523,12 @@ class ProductBatch(models.Model):
         ordering = ['expiration_date', 'created_at']  # FIFO по умолчанию
 
     def sell(self, quantity):
+        quantity = Decimal(str(quantity))
+        
+        # Проверка на unit.decimal_places для штучных товаров
+        if self.product.unit.decimal_places == 0 and not quantity.is_integer():
+            raise ValueError("Для штучных товаров количество должно быть целым")
+            
         if quantity > self.quantity:
             raise ValueError(
                 f"Недостаточно товара в партии. Доступно: {self.quantity}, запрошено: {quantity}"
@@ -481,15 +536,16 @@ class ProductBatch(models.Model):
         self.quantity = F('quantity') - quantity
         self.save(update_fields=['quantity'])
         self.refresh_from_db()
-        
+
         if self.quantity == 0:
             self.delete()
             logger.info(f"Партия {self.id} удалена (товар {self.product.name})")
-        
+
         return quantity
 
     def __str__(self):
         return f"{self.product.name} × {self.quantity} (поставщик: {self.supplier})"
+
 
 class Stock(models.Model):
     product = models.OneToOneField(
@@ -512,6 +568,7 @@ class Stock(models.Model):
         verbose_name_plural = "Остатки на складе"
 
     def update_quantity(self):
+        """Обновляет общее количество товара на основе партий"""
         total = self.product.batches.aggregate(
             total=Sum('quantity')
         )['total'] or Decimal('0')
@@ -520,37 +577,43 @@ class Stock(models.Model):
 
     def sell(self, quantity):
         quantity = Decimal(str(quantity)).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+        
+        # Проверка на unit.decimal_places для штучных товаров
+        if self.product.unit.decimal_places == 0 and not quantity.is_integer():
+            raise ValueError("Для штучных товаров количество должно быть целым")
+            
         if quantity <= 0:
             raise ValueError("Количество должно быть положительным")
-            
+
         if self.quantity < quantity:
             raise ValueError(
-                f"Недостаточно товара '{self.product.name}'. "
-                f"Доступно: {self.quantity} {self.product.unit.name}, запрошено: {quantity}"
+                f"Недостаточно товара '{self.product.name}'. Доступно: {self.quantity}, запрошено: {quantity}"
             )
 
         remaining = quantity
         batches = self.product.batches.order_by('expiration_date', 'created_at')
-        
+
         for batch in batches:
             if remaining <= 0:
                 break
+
             sell_amount = min(remaining, batch.quantity)
             batch.sell(sell_amount)
             remaining -= sell_amount
 
         self.update_quantity()
-        logger.info(f"Продано {quantity} {self.product.unit.name} {self.product.name}")
+        logger.info(f"Продано {quantity} {self.product.get_unit_display()} {self.product.name}")
 
     def __str__(self):
-        return f"{self.product.name}: {self.quantity} {self.product.unit.name}"
-    
+        return f"{self.product.name}: {self.quantity} {self.product.get_unit_display()}"
+
 
 @receiver(post_save, sender=Product)
 def create_product_stock(sender, instance, created, **kwargs):
     if created and not hasattr(instance, 'stock'):
         Stock.objects.create(product=instance)
         logger.info(f"Создан остаток для товара: {instance.name}")
+
 
 @receiver(post_save, sender=ProductBatch)
 def update_stock_on_batch_change(sender, instance, **kwargs):

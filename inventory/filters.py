@@ -12,7 +12,19 @@ class ProductFilter(django_filters.FilterSet):
     barcode = django_filters.CharFilter(lookup_expr='exact', label='Точный штрих-код')
     category = django_filters.NumberFilter(field_name='category', label='Категория')
     
-    # Фильтрация по атрибутам
+    # --- фильтры по создателю ---
+    created_by = django_filters.NumberFilter(
+        field_name='created_by__id',
+        lookup_expr='exact',
+        label='ID создателя'
+    )
+    created_by_username = django_filters.CharFilter(
+        field_name='created_by__username',
+        lookup_expr='iexact',
+        label='Имя создателя'
+    )
+
+    # --- фильтрация по атрибутам ---
     brand = django_filters.ModelChoiceFilter(
         queryset=AttributeValue.objects.filter(attribute_type__slug='brand'),
         field_name='attributes',
@@ -31,7 +43,7 @@ class ProductFilter(django_filters.FilterSet):
         label='Цвет'
     )
     
-    # Фильтрация по остаткам
+    # --- фильтрация по остаткам ---
     min_stock = django_filters.NumberFilter(
         field_name='stock__quantity',
         lookup_expr='gte',
@@ -44,7 +56,7 @@ class ProductFilter(django_filters.FilterSet):
         label='Максимальный остаток'
     )
     
-    # Фильтрация по цене
+    # --- фильтрация по цене ---
     min_price = django_filters.NumberFilter(
         field_name='sale_price',
         lookup_expr='gte',
@@ -57,7 +69,7 @@ class ProductFilter(django_filters.FilterSet):
         label='Максимальная цена'
     )
     
-    # Специальные фильтры
+    # --- специальные фильтры ---
     has_stock = django_filters.BooleanFilter(
         method='filter_has_stock',
         label='Есть на складе'
@@ -73,7 +85,7 @@ class ProductFilter(django_filters.FilterSet):
         fields = [
             'name', 'barcode', 'category', 'brand', 'size', 'color',
             'min_stock', 'max_stock', 'min_price', 'max_price',
-            'has_stock', 'low_stock'
+            'has_stock', 'low_stock', 'created_by', 'created_by_username'
         ]
 
     def filter_has_stock(self, queryset, name, value):
@@ -85,6 +97,7 @@ class ProductFilter(django_filters.FilterSet):
         if value:
             return queryset.filter(stock__quantity__lte=10, stock__quantity__gt=0)
         return queryset
+
 
 
 class ProductBatchFilter(django_filters.FilterSet):

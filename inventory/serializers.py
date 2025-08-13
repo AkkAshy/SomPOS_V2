@@ -11,13 +11,12 @@ from .models import (
 )
 
 
-
 class UnitChoiceSerializer(serializers.ModelSerializer):
-    get_name_display = serializers.CharField(read_only=True)
+    display_name = serializers.CharField(source='get_name_display', read_only=True)
+    
     class Meta:
         model = Unit
-        fields = ['id', 'name', 'get_name_display']
-    
+        fields = ['id', 'name', 'display_name', 'decimal_places']
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -37,17 +36,21 @@ class ProductCategorySerializer(serializers.ModelSerializer):
             )
         return value
 
+
+############################################################# Атрибуты #############################################################
 class AttributeValueSerializer(serializers.ModelSerializer):
     class Meta:
         model = AttributeValue
         fields = ['id', 'attribute_type', 'value', 'slug']
 
+
 class AttributeTypeSerializer(serializers.ModelSerializer):
     values = AttributeValueSerializer(many=True, read_only=True)
-    
+
     class Meta:
         model = AttributeType
         fields = ['id', 'name', 'slug', 'is_filterable', 'values']
+
 
 class ProductAttributeSerializer(serializers.ModelSerializer):
     attribute = AttributeValueSerializer(read_only=True)
@@ -61,12 +64,15 @@ class ProductAttributeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductAttribute
         fields = ['attribute', 'attribute_id']
+############################################################# Атрибуты конец #############################################################
+
 
 class SizeChartSerializer(serializers.ModelSerializer):
     class Meta:
         model = SizeChart
-        fields = ['id', 'name', 'description', 'created_at']  # Убрано 'values', так как его нет в модели
+        fields = ['id', 'name', 'description', 'created_at']
         read_only_fields = ['created_at']
+
 
 class SizeInfoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -82,11 +88,8 @@ class SizeInfoSerializer(serializers.ModelSerializer):
             }
         }
 
-from rest_framework import serializers
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
-from .models import ProductBatch, Product
 
+############################################################## Продукты #############################################################
 
 class ProductBatchSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
@@ -108,6 +111,7 @@ class ProductBatchSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'product_name', 'size']
 
     def get_size(self, obj):
+        """Возвращает размер из поля size модели Product"""
         if obj.product and obj.product.size:
             return obj.product.size.size
         return None
@@ -117,6 +121,13 @@ class ProductBatchSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 _("Количество должно быть больше нуля"),
                 code='invalid_quantity'
+            )
+        
+        # Приводим к Decimal и округляем согласно единице измерения продукта
+        if hasattr(self, 'instance') and self.instance and self.instance.product:
+            unit = self.instance.product.unit
+            return Decimal(str(value)).quantize(
+                Decimal('0.1') ** unit.decimal_places, rounding=ROUND_HALF_UP
             )
         return value
 
@@ -155,16 +166,20 @@ class ProductSerializer(serializers.ModelSerializer):
         required=True,
         help_text=_('ID единицы измерения')
     )
-    batches = ProductBatchSerializer(many=True, read_only=True)
+    batches = ProductBatchSerializer(
+        many=True,
+        read_only=True,
+        help_text=_('Партии товара')
+    )
 
     class Meta:
         model = Product
         fields = [
-            'id', 
-            'name', 
-            'barcode', 
-            'category', 
-            'category_name', 
+            'id',
+            'name',
+            'barcode',
+            'category',
+            'category_name',
             'sale_price',
             'created_at',
             'size',
@@ -174,8 +189,9 @@ class ProductSerializer(serializers.ModelSerializer):
             'current_stock',
             'batches',
             'image_label',
+            'created_by'
         ]
-        read_only_fields = ['created_at', 'current_stock']
+        read_only_fields = ['created_at', 'current_stock', 'created_by']
         extra_kwargs = {
             'name': {'trim_whitespace': True},
             'barcode': {
@@ -195,32 +211,49 @@ class ProductSerializer(serializers.ModelSerializer):
     def validate_barcode(self, value):
         if not value:
             return value
+
         value = value.strip()
         if not value.isdigit():
             raise serializers.ValidationError(
                 _("Штрихкод должен содержать только цифры"),
                 code='invalid_barcode_format'
             )
+
         if len(value) > 100:
             raise serializers.ValidationError(
                 _("Штрихкод не может быть длиннее 100 символов"),
                 code='barcode_too_long'
             )
-        if Product.objects.filter(barcode=value).exclude(pk=self.instance.pk if self.instance else None).exists():
+
+        if Product.objects.filter(barcode=value) \
+           .exclude(pk=self.instance.pk if self.instance else None) \
+           .exists():
             raise serializers.ValidationError(
                 _("Товар с таким штрихкодом уже существует"),
                 code='duplicate_barcode'
             )
+
         return value
-    
+
     def create(self, validated_data):
+        """
+        Создание товара с правильной обработкой размера
+        """
+        validated_data.pop('created_by', None)
         size = validated_data.pop('size', None)
-        product = super().create(validated_data)
+
+        user = self.context['request'].user
+
+        # Создаем товар БЕЗ размера
+        product = Product.objects.create(created_by=user, **validated_data)
+
+        # Устанавливаем размер ПОСЛЕ создания
         if size:
             product.size = size
             product.save()
+
         return product
-    
+
     def update(self, instance, validated_data):
         size = validated_data.pop('size', None)
         product = super().update(instance, validated_data)
@@ -229,9 +262,17 @@ class ProductSerializer(serializers.ModelSerializer):
             product.save()
         return product
 
+
 class StockSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source='product.name', read_only=True)
-    product_barcode = serializers.CharField(source='product.barcode', read_only=True, allow_null=True)
+    product_name = serializers.CharField(
+        source='product.name',
+        read_only=True
+    )
+    product_barcode = serializers.CharField(
+        source='product.barcode',
+        read_only=True,
+        allow_null=True
+    )
     unit = UnitChoiceSerializer(source='product.unit', read_only=True)
 
     class Meta:
@@ -247,22 +288,32 @@ class StockSerializer(serializers.ModelSerializer):
                 'quantity': 100
             }
         }
-        
+
     def validate_quantity(self, value):
         if value < 0:
             raise serializers.ValidationError(
                 _("Количество не может быть отрицательным"),
                 code='negative_quantity'
             )
+        
+        # Добавляем валидацию decimal_places
         product_id = self.initial_data.get('product') or (self.instance.product.id if self.instance else None)
         if product_id:
-            product = Product.objects.get(id=product_id)
-            quantity_str = str(Decimal(value).quantize(Decimal('0.1') ** product.unit.decimal_places))
-            if len(quantity_str.split('.')[-1]) > product.unit.decimal_places:
-                raise serializers.ValidationError(
-                    f"Количество должно иметь не более {product.unit.decimal_places} знаков после запятой."
+            try:
+                product = Product.objects.get(id=product_id)
+                quantity_decimal = Decimal(str(value)).quantize(
+                    Decimal('0.1') ** product.unit.decimal_places, rounding=ROUND_HALF_UP
                 )
-        return value.quantize(Decimal('0.1') ** product.unit.decimal_places, rounding=ROUND_HALF_UP)
+                # Проверяем на целочисленность для штучных товаров
+                if product.unit.decimal_places == 0 and not quantity_decimal.is_integer():
+                    raise serializers.ValidationError(
+                        "Для штучных товаров количество должно быть целым."
+                    )
+                return quantity_decimal
+            except Product.DoesNotExist:
+                pass
+        
+        return value
 
 
 class ProductMultiSizeCreateSerializer(serializers.Serializer):
@@ -276,11 +327,13 @@ class ProductMultiSizeCreateSerializer(serializers.Serializer):
         required=True,
         help_text=_('ID единицы измерения')
     )
-    batch_info = serializers.ListField(
-        child=serializers.DictField(),
-        allow_empty=False,
-        help_text="Список партий с размером и количеством"
+    size_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        allow_empty=True,
+        required=False,
+        help_text="Список ID размеров (для одежды, optional для сантехники)"
     )
+    batch_info = serializers.JSONField(required=False)
 
     def validate_name(self, value):
         return value.strip()
@@ -288,77 +341,168 @@ class ProductMultiSizeCreateSerializer(serializers.Serializer):
     def validate_sale_price(self, value):
         return round(value, 2)
 
+    def validate(self, data):
+        """Проверяем комбинации для совместимости"""
+        size_ids = data.get('size_ids')
+        batch_info = data.get('batch_info')
+        
+        if not size_ids and not batch_info:
+            # Для сантехники позволяем создать один продукт без дополнительной информации
+            return data
+        
+        if batch_info and isinstance(batch_info, list) and size_ids:
+            raise serializers.ValidationError(
+                "Если batch_info — list (с size_id в каждом), не используйте size_ids одновременно"
+            )
+        
+        return data
+
     def validate_batch_info(self, value):
-        seen_sizes = set()
-        unit_id = self.initial_data.get('unit_id')
-        if not unit_id:
-            raise serializers.ValidationError({"unit_id": "Не указана единица измерения."})
-        unit = Unit.objects.get(id=unit_id)
-
-        for item in value:
-            size_id = item.get('size_id')
-            if not size_id:
-                raise serializers.ValidationError("Каждая партия должна содержать size_id.")
-            if size_id in seen_sizes:
-                raise serializers.ValidationError(f"Размер с ID {size_id} указан дважды.")
-            seen_sizes.add(size_id)
-
-            quantity = item.get('quantity')
+        if not value:
+            return value
+        
+        unit = Unit.objects.get(id=self.initial_data.get('unit_id'))
+        
+        if isinstance(value, dict):
+            # Старый формат: dict без size_id
+            quantity = value.get('quantity')
             if quantity is None:
-                raise serializers.ValidationError("Каждая партия должна содержать quantity.")
+                raise serializers.ValidationError("batch_info (dict) должен содержать quantity.")
             if quantity <= 0:
-                raise serializers.ValidationError("Количество в партии должно быть больше нуля.")
-            quantity_str = str(Decimal(quantity).quantize(Decimal('0.1') ** unit.decimal_places))
-            if len(quantity_str.split('.')[-1]) > unit.decimal_places:
-                raise serializers.ValidationError(
-                    f"Количество в партии должно иметь не более {unit.decimal_places} знаков после запятой."
-                )
-        return value
-
-    def create(self, validated_data):
-        batch_info = validated_data.pop('batch_info')
-        base_name = validated_data.pop('name')
-        unit = validated_data['unit']
-        created_products = []
-
-        for info in batch_info:
-            size = SizeInfo.objects.get(pk=info['size_id'])
-            quantity = Decimal(info['quantity']).quantize(
+                raise serializers.ValidationError("Количество должно быть больше нуля.")
+            
+            quantity_decimal = Decimal(str(quantity)).quantize(
                 Decimal('0.1') ** unit.decimal_places, rounding=ROUND_HALF_UP
             )
-            purchase_price = info.get('purchase_price')
-            supplier = info.get('supplier')
-            expiration_date = info.get('expiration_date')
+            value['quantity'] = quantity_decimal
+            
+            expiration_date = value.get('expiration_date')
+            if expiration_date and expiration_date < timezone.now().date():
+                raise serializers.ValidationError("Срок годности в прошлом.")
+            
+            return value
+        
+        elif isinstance(value, list):
+            # Новый формат: list dict, каждый с size_id
+            seen_sizes = set()
+            for item in value:
+                size_id = item.get('size_id')
+                if size_id is None:
+                    raise serializers.ValidationError("Каждый item в batch_info (list) должен иметь size_id.")
+                if size_id in seen_sizes:
+                    raise serializers.ValidationError(f"Size_id {size_id} дублируется.")
+                seen_sizes.add(size_id)
+                
+                quantity = item.get('quantity')
+                if quantity is None:
+                    raise serializers.ValidationError("Каждый item должен иметь quantity.")
+                if quantity <= 0:
+                    raise serializers.ValidationError("Количество должно быть больше нуля.")
+                
+                quantity_decimal = Decimal(str(quantity)).quantize(
+                    Decimal('0.1') ** unit.decimal_places, rounding=ROUND_HALF_UP
+                )
+                item['quantity'] = quantity_decimal
+                
+                expiration_date = item.get('expiration_date')
+                if expiration_date and expiration_date < timezone.now().date():
+                    raise serializers.ValidationError("Срок годности в прошлом.")
+            
+            return value
+        
+        else:
+            raise serializers.ValidationError("batch_info должен быть dict или list dict.")
 
-            barcode = self._generate_unique_barcode()
+    def save(self, **kwargs):
+        created_by = kwargs.get('created_by')
+        if not created_by:
+            raise serializers.ValidationError("created_by required")
 
-            product = Product.objects.create(
-                name=base_name,
-                barcode=barcode,
-                size=size,
-                unit=unit,
-                **validated_data
-            )
+        validated_data = self.validated_data
+        size_ids = validated_data.pop('size_ids', [])
+        batch_info = validated_data.pop('batch_info', None)
+        unit = validated_data['unit']
+        base_name = validated_data['name']
 
-            ProductBatch.objects.create(
-                product=product,
-                quantity=quantity,
-                purchase_price=purchase_price,
-                supplier=supplier,
-                expiration_date=expiration_date
-            )
+        created_products = []
 
-            product.generate_label()
-            created_products.append(product)
+        if isinstance(batch_info, list):
+            # Новый формат: каждый item — отдельный продукт с size_id и своей партией
+            for info in batch_info:
+                size_id = info.pop('size_id')
+                try:
+                    size_instance = SizeInfo.objects.get(id=size_id)
+                except SizeInfo.DoesNotExist:
+                    raise serializers.ValidationError(f"Size {size_id} not exist")
+
+                product_name = f"{base_name} - {size_instance.size}" if size_instance else base_name
+                barcode = self.generate_unique_barcode()
+
+                product_data = {
+                    **validated_data,
+                    'name': product_name,
+                    'barcode': barcode,
+                    'created_by': created_by,
+                    'size': size_instance,
+                    'unit': unit
+                }
+
+                product = Product.objects.create(**product_data)
+
+                # Создаем партию из оставшихся info
+                if info:
+                    ProductBatch.objects.create(
+                        product=product,
+                        **info
+                    )
+
+                product.generate_label()
+                created_products.append(product)
+
+        else:
+            # Старый формат или сантехника: size_ids (или пустой для одного), batch_info dict общий
+            if not size_ids:
+                # Для сантехники: создать один без size
+                size_ids = [None]
+
+            for size_id in size_ids:
+                size_instance = None
+                if size_id:
+                    try:
+                        size_instance = SizeInfo.objects.get(id=size_id)
+                    except SizeInfo.DoesNotExist:
+                        raise serializers.ValidationError(f"Size {size_id} not exist")
+
+                product_name = f"{base_name} - {size_instance.size}" if size_instance else base_name
+                barcode = self.generate_unique_barcode()
+
+                product_data = {
+                    **validated_data,
+                    'name': product_name,
+                    'barcode': barcode,
+                    'created_by': created_by,
+                    'size': size_instance,
+                    'unit': unit
+                }
+
+                product = Product.objects.create(**product_data)
+
+                # Добавляем общую партию, если dict
+                if batch_info:
+                    ProductBatch.objects.create(
+                        product=product,
+                        **batch_info
+                    )
+
+                product.generate_label()
+                created_products.append(product)
 
         return created_products
 
-    def _generate_unique_barcode(self):
-        import random
-        import time
-        while True:
-            timestamp = str(int(time.time()))[-8:]
-            random_part = str(random.randint(1000, 9999))
-            barcode = timestamp + random_part
-            if not Product.objects.filter(barcode=barcode).exists():
-                return barcode
+    def generate_unique_barcode(self):
+        """Генерирует уникальный штрих-код"""
+        import uuid
+        return str(uuid.uuid4().int)[:12]
+
+
+############################################################### Продукты конец #############################################################
