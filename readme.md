@@ -65,7 +65,7 @@ SomPOS - это полнофункциональная система управ
 
 ```bash
 git clone git clone https://github.com/AkkAshy/SomPOS_V2.git
-cd sompos
+cd SomPOS_V2
 ```
 
 ### 2. Создание виртуального окружения
