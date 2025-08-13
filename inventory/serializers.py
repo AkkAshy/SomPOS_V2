@@ -161,7 +161,7 @@ class ProductSerializer(serializers.ModelSerializer):
     unit = UnitChoiceSerializer(read_only=True)
     unit_id = serializers.PrimaryKeyRelatedField(
         source='unit',
-        queryset=Unit.objects.all(),
+        queryset=Unit.objects.all(),  # ← Правильно
         write_only=True,
         required=True,
         help_text=_('ID единицы измерения')

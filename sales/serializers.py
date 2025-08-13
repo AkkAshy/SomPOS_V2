@@ -21,19 +21,13 @@ class TransactionItemSerializer(serializers.ModelSerializer):
     )
     sell_unit = serializers.CharField(
         required=False,
-        help_text="Единица измерения для продажи (если отличается от базовой единицы товара)"
+        help_text="Единица измерения для продажи"
     )
-    quantity = serializers.DecimalField(
-        max_digits=10, 
-        decimal_places=4, 
-        write_only=True,
-        help_text="Количество в единицах продажи"
-    )
-
+    
     class Meta:
         model = TransactionItem
-        fields = ['product_id', 'quantity', 'sell_unit', 'quantity', 'price']
-        read_only_fields = ['quantity', 'price']  # Эти поля рассчитываются автоматически
+        fields = ['product_id', 'quantity', 'sell_unit', 'price']
+        read_only_fields = ['price']
 
 
 class TransactionSerializer(serializers.ModelSerializer):

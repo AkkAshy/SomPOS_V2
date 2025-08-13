@@ -58,9 +58,9 @@ class CustomerViewSet(viewsets.ModelViewSet):
         }
     )
     def create(self, request):
-        number = request.data.get('number')
+        phone = request.data.get('phone')
 
-        if Customer.objects.filter(number=number).exists():
+        if Customer.objects.filter(phone=phone).exists():
             return Response(
                 {"message": "Клиент с таким номером уже существует."},
                 status=status.HTTP_400_BAD_REQUEST
