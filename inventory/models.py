@@ -526,8 +526,9 @@ class ProductBatch(models.Model):
         quantity = Decimal(str(quantity))
         
         # Проверка на unit.decimal_places для штучных товаров
-        if self.product.unit.decimal_places == 0 and not quantity.is_integer():
-            raise ValueError("Для штучных товаров количество должно быть целым")
+        if self.product.unit.decimal_places == 0 and quantity != quantity.to_integral_value():
+            raise ValueError("Количество должно быть целым числом для данного типа единиц")
+            
             
         if quantity > self.quantity:
             raise ValueError(
@@ -579,8 +580,9 @@ class Stock(models.Model):
         quantity = Decimal(str(quantity)).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
         
         # Проверка на unit.decimal_places для штучных товаров
-        if self.product.unit.decimal_places == 0 and not quantity.is_integer():
-            raise ValueError("Для штучных товаров количество должно быть целым")
+        if self.product.unit.decimal_places == 0 and quantity != quantity.to_integral_value():
+            raise ValueError("Количество должно быть целым числом для данного типа единиц")
+            
             
         if quantity <= 0:
             raise ValueError("Количество должно быть положительным")

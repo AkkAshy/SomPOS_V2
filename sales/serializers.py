@@ -216,7 +216,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         return transaction
 
 
-class TransactionHistorySerializer(serializers.ModelSerializer):
+class FilteredTransactionHistorySerializer(serializers.ModelSerializer):
+    """
+    Сериализатор с фильтрацией - возвращает только валидные записи
+    """
     parsed_details = serializers.SerializerMethodField()
 
     class Meta:
@@ -225,9 +228,30 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
 
     def get_parsed_details(self, obj):
         try:
-            return json.loads(obj.details)
+            details = json.loads(obj.details)
+
+            # Возвращаем только если есть обязательные поля
+            if (details.get('total_amount') and
+                details.get('items') and
+                len(details.get('items', [])) > 0):
+                return details
+
+            return None  # Если данные неполные
+
         except json.JSONDecodeError:
-            return {"raw_details": obj.details}
+            return None
+
+    def to_representation(self, instance):
+        """
+        Переопределяем для исключения записей с пустыми parsed_details
+        """
+        data = super().to_representation(instance)
+
+        # Если parsed_details пустые, возвращаем None (исключаем из результата)
+        if not data.get('parsed_details'):
+            return None
+
+        return data
 
 
 class CashierAggregateSerializer(serializers.Serializer):

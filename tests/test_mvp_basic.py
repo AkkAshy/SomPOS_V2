@@ -6,6 +6,10 @@ from sales.models import Transaction, TransactionItem
 from customers.models import Customer
 from decimal import Decimal
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+
 class MVPBasicTests(TestCase):
     def setUp(self):
         # Создаем тестовые данные
@@ -14,6 +18,61 @@ class MVPBasicTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='test123')
         self.group = Group.objects.create(name='cashier')
         self.user.groups.add(self.group)
+
+    def test_debug_stock_operations(self):
+        """Тест с отладочной информацией"""
+        from inventory.models import ProductBatch
+        import logging
+        
+        # Включаем отладку
+        logging.basicConfig(level=logging.DEBUG)
+        logger = logging.getLogger()
+        
+        product = Product.objects.create(
+            name='Debug Товар',
+            category=self.category,
+            unit=self.unit,
+            sale_price=Decimal('200.00'),
+            created_by=self.user
+        )
+        
+        print(f"1. Начальный остаток: {product.stock.quantity}")
+        
+        # Создаем партию товара
+        batch = ProductBatch.objects.create(
+            product=product,
+            quantity=Decimal('10'),
+            purchase_price=Decimal('150.00'),
+            supplier='Тестовый поставщик'
+        )
+        
+        print(f"2. После создания партии: {product.stock.quantity}")
+        
+        # Обновляем остаток из базы
+        product.stock.refresh_from_db()
+        print(f"3. После refresh_from_db: {product.stock.quantity}")
+        
+        # Проверяем партии
+        batches = product.batches.all()
+        print(f"4. Количество партий: {batches.count()}")
+        for b in batches:
+            print(f"   Партия {b.id}: {b.quantity}")
+        
+        # Продажа
+        print("5. Начинаем продажу 3 единиц...")
+        product.stock.sell(Decimal('3'))
+        
+        # Проверяем результат
+        product.stock.refresh_from_db()
+        print(f"6. После продажи: {product.stock.quantity}")
+        
+        # Проверяем партии после продажи
+        batches = product.batches.all()
+        print(f"7. Партии после продажи:")
+        for b in batches:
+            print(f"   Партия {b.id}: {b.quantity}")
+        
+        self.assertEqual(product.stock.quantity, Decimal('7'))
 
     def test_product_creation(self):
         """Тест создания товара"""
@@ -114,8 +173,14 @@ class MVPBasicTests(TestCase):
         
         # Проверяем результат
         product.stock.refresh_from_db()
+        logging.debug(f"Stock before sale: {product.stock.quantity}")
         self.assertEqual(product.stock.quantity, Decimal('3'))
+        print(product.stock.quantity)
+        logging.debug(f"Stock before sale: {product.stock.quantity}")
         self.assertEqual(transaction.status, 'completed')
+        return product.stock.quantity
+    
+    
 
     def test_debt_transaction(self):
         """Тест продажи в долг"""
@@ -152,3 +217,5 @@ class MVPBasicTests(TestCase):
         
         customer.refresh_from_db()
         self.assertEqual(customer.debt, Decimal('100.00'))
+
+

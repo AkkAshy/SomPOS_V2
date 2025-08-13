@@ -8,7 +8,8 @@ from .models import SMS_Template as SmsTemplate
 from customers.models import Customer as UserProfile
 from django.conf import settings
 
-
+import os
+from dotenv import load_dotenv
 
 
 class SmsSenderViewSet(viewsets.ModelViewSet):
@@ -29,12 +30,11 @@ class SmsSenderViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-# ESKIZ_EMAIL = getattr(settings, "ESKIZ_EMAIL", "asirepovakkanat@gmail.com")
-# ESKIZ_PASSWORD = getattr(settings, "ESKIZ_PASSWORD", "uUF_gss6q!wAEy.")
 
 
-ESKIZ_EMAIL = "asirepovakkanat@gmail.com"
-ESKIZ_PASSWORD = "uUF_gss6q!wAEy."
+ESKIZ_EMAIL = os.getenv("ESKIZ_EMAIL")
+ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD")
+
 BASE_URL = "https://notify.eskiz.uz/api"
 
 
