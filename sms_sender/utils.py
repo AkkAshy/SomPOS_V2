@@ -1,55 +1,50 @@
-# import requests
-
-# ESKIZ_EMAIL = "asirepovakkanat@gmail.com"
-# ESKIZ_PASSWORD = "uUF_gss6q!wAEy."
-# BASE_URL = "https://notify.eskiz.uz/api"
-
-
-# def get_eskiz_token():
-#     """Авторизация и получение Bearer токена"""
-#     response = requests.post(
-#         f"{BASE_URL}/auth/login",
-#         data={"email": ESKIZ_EMAIL, "password": ESKIZ_PASSWORD}
-#     )
-#     return response.json()
-
-# print(get_eskiz_token())
-
 import requests
+import os
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
-# 1. Логинимся в Eskiz
-login_url = "https://notify.eskiz.uz/api/auth/login"
-auth_data = {
-    'email': 'asirepovakkanat@gmail.com',
-    'password': 't3sblMZoZDnC5L5Yqx2eZvIeRA6a6FvoP20Gah0F'
-}
-login_response = requests.post(login_url, data=auth_data)
-login_response.raise_for_status()
-token = login_response.json()["data"]["token"]
 
-print("TOKEN:", token)
+BASE_URL = "https://notify.eskiz.uz/api"
+ESKIZ_EMAIL = os.getenv("ESKIZ_EMAIL", "asirepovakkanat@gmail.com")
+ESKIZ_PASSWORD = os.getenv("ESKIZ_PASSWORD", "t3sblMZoZDnC5L5Yqx2eZvIeRA6a6FvoP20Gah0F")
 
-# 2. Отправляем СМС
-send_url = "https://notify.eskiz.uz/api/message/sms/send"
-payload = {
-    'mobile_phone': '998913865828',
-    'from': '4546',
-    'message': 'Это тест от Eskiz',
-    'callback_url': '',
-    'unicode': '0'
-}
-headers = {
-    "Authorization": f"Bearer {token}"
-}
+# Храним токен и время его жизни в памяти
+_eskiz_token = None
+_eskiz_token_expire = None
 
-send_response = requests.post(send_url, data=payload, headers=headers)
 
-print("STATUS:", send_response.status_code)
-try:
-    print("RESPONSE:", send_response.json())
-except Exception:
-    print("RESPONSE TEXT:", send_response.text)
+def get_eskiz_token():
+    global _eskiz_token, _eskiz_token_expire
 
-send_response.raise_for_status()
+    # Если токен есть и он ещё живой
+    if _eskiz_token and _eskiz_token_expire and datetime.utcnow() < _eskiz_token_expire:
+        return _eskiz_token
 
-print(send_response.json())
+    # Если токен есть, но он просрочен → обновляем
+    if _eskiz_token and _eskiz_token_expire and datetime.utcnow() >= _eskiz_token_expire:
+        try:
+            resp = requests.patch(f"{BASE_URL}/auth/refresh", headers={
+                "Authorization": f"Bearer {_eskiz_token}"
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                _eskiz_token = data["data"]["token"]
+                _eskiz_token_expire = datetime.utcnow() + timedelta(hours=23)
+                return _eskiz_token
+            else:
+                print("❌ Ошибка refresh, перезапрашиваем login...")
+        except Exception as e:
+            print(f"Ошибка при refresh: {e}")
+
+    # Если токена нет или refresh не сработал — делаем login
+    login_resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        data={"email": ESKIZ_EMAIL, "password": ESKIZ_PASSWORD}
+    )
+    login_resp.raise_for_status()
+    data = login_resp.json()
+    _eskiz_token = data["data"]["token"]
+    _eskiz_token_expire = datetime.utcnow() + timedelta(hours=23)  # токен живёт 24ч
+    return _eskiz_token
+
+print(get_eskiz_token())
