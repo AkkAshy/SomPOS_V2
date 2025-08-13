@@ -172,25 +172,29 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+from logging.handlers import TimedRotatingFileHandler
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
 
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module} {message}',
+            'format': '{asctime} {levelname} {module} {message}',
             'style': '{',
-        },
-        'simple': {
-            'format': '{levelname} {message}',
-            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',  # формат времени
         },
     },
     'handlers': {
         'file': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'pos.log'),
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'pos.log'),
+            'when': 'midnight',      # ротация в полночь
+            'interval': 1,           # каждые 1 сутки
+            'backupCount': 30,       # хранить 30 файлов
+            'encoding': 'utf-8',
         },
     },
     'loggers': {
