@@ -331,15 +331,10 @@ sompos/
 4. Отправьте в ветку (`git push origin feature/amazing-feature`)
 5. Откройте Pull Request
 
-## 📄 Лицензия
-
-Этот проект распространяется под лицензией MIT. См. файл `LICENSE` для подробностей.
 
 ## 📞 Поддержка
 
-- **Email:** support@sompos.com
-- **Документация:** [https://sompos-docs.com](https://sompos-docs.com)
-- **Issues:** [GitHub Issues](https://github.com/yourusername/sompos/issues)
+- **Email:** asirepovakkanat@gmail.com
 
 ## 🎯 Roadmap
 
